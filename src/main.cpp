@@ -1,66 +1,72 @@
 #include <Arduino.h>
-#include <CrashReport.h>
-#include <LSR_Struct.h>
-#include <SD.h>
-#include <SPI.h>
+#include "SensorManager.h"
 
-#define DEBUG 1
+// Chip Select pins
+constexpr uint8_t LSM_CS = 10;
+constexpr uint8_t BMP_CS = 9;
 
-#if DEBUG
-  #define DEBUG_PRINT(x)  Serial.print(x)
-  #define DEBUG_PRINTLN(x)  Serial.println(x)
-#else
-  #define DEBUG_PRINT(x)
-  #define DEBUG_PRINTLN(x)
-#endif
+SensorManager sensors(LSM_CS, BMP_CS);
 
-enum State {
-  STATE_IDLE,
-  STATE_LAUNCH,
-  STATE_APOGEE,
-  STATE_LANDED
-} rckt_state;
-
-E22_Packet packet;
+unsigned long lastPrint = 0;
 
 void setup() {
   Serial.begin(115200);
+  while (!Serial && millis() < 3000);
 
-  // Initalize SPI
-  SPI.begin();
+  Serial.println("Teensy 4.1 Sensor System");
 
-  // Initialize SD card
-  if (!SD.begin(BUILTIN_SDCARD)) {
-    DEBUG_PRINTLN("SD card initialization failed!");
+  if (!sensors.begin()) {
+    Serial.println("Sensor init failed");
+    while (1);
   }
 
-  // Check for crash report
-  if(CrashReport) {
-    DEBUG_PRINTLN("Previous crash detected!\n");
-    File crashReport = SD.open("crashreport.log", FILE_WRITE);
-
-    if (crashReport) {
-      CrashReport.printTo(crashReport);
-      crashReport.close();
-      DEBUG_PRINTLN("Crash report written to crashreport.log");
-    } else {
-      DEBUG_PRINTLN("Failed to open crashreport.log for writing!");
-    }
-    
-    if(DEBUG) {
-      DEBUG_PRINTLN("Crash Report:");
-      CrashReport.printTo(Serial);
-    }
-
-    CrashReport.clear();
-  }
-
-  // Initialize state machine
-  rckt_state = STATE_IDLE;
-  packet.State = STATE_IDLE;
-
+  Serial.println("All sensors initialized");
 }
 
 void loop() {
-  
+  sensors.update();
+
+  if (millis() - lastPrint > 200) {
+    lastPrint = millis();
+
+    Serial.println("---- DATA ----");
+
+    Serial.print("Accel g: ");
+    Serial.print(sensors.ax, 3); Serial.print(", ");
+    Serial.print(sensors.ay, 3); Serial.print(", ");
+    Serial.println(sensors.az, 3);
+
+    Serial.print("Gyro dps: ");
+    Serial.print(sensors.gx, 3); Serial.print(", ");
+    Serial.print(sensors.gy, 3); Serial.print(", ");
+    Serial.println(sensors.gz, 3);
+
+    Serial.print("Temp C: ");
+    Serial.println(sensors.temperature, 2);
+
+    Serial.print("Pressure hPa: ");
+    Serial.println(sensors.pressure_hPa, 2);
+
+    Serial.print("Altitude m: ");
+    Serial.println(sensors.altitude_m, 2);
+
+    if (sensors.gpsFix) {
+      Serial.print("Lat: ");
+      Serial.println(sensors.latitude, 6);
+
+      Serial.print("Lon: ");
+      Serial.println(sensors.longitude, 6);
+
+      Serial.print("GPS Alt m: ");
+      Serial.println(sensors.gpsAltitude);
+
+      Serial.print("Sats: ");
+      Serial.println(sensors.satellites);
+    } else {
+      Serial.println("GPS: No fix");
+    }
+
+    Serial.println();
+  }
 }
+
