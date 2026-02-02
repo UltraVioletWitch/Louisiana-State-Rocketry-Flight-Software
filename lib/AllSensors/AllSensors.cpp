@@ -43,11 +43,12 @@ void AllSensors::calibrateBMPSeaLevel(void) {
     }
 
     float sumPressure = 0;
-    for (int i = 0; i < 10; i++) {
+    int numReadings = 50;
+    for (int i = 0; i < numReadings; i++) {
         bmp.performReading();
         sumPressure += bmp.pressure / 100.0;
     }
-    bmpSeaLevel_hPa = sumPressure / 10;
+    bmpSeaLevel_hPa = sumPressure / numReadings;
     Serial.print(F("BMP sea-level pressure manually set to: "));
     Serial.println(bmpSeaLevel_hPa);
 }
