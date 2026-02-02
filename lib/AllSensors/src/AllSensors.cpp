@@ -54,6 +54,37 @@ void AllSensors::calibrateBMPSeaLevel(void) {
 }
 
 // Update all sensors
+//
+void AllSensors::readBMP() {
+    bmp.performReading();
+
+    pressure = bmp.pressure;
+    temp = bmp.temperature;
+}
+
+void AllSensors::readIMU() {
+    sensors_event_t accel, gyro, temp;
+    lsm.getEvent(&accel, &gyro, &temp);
+
+    AccelX = accel.acceleration.x;
+    AccelY = accel.acceleration.y;
+    AccelZ = accel.acceleration.z;
+    gyroX = gyro.gyro.x;
+    gyroY = gyro.gyro.y;
+    gyroZ = gyro.gyro.z;
+}
+
+void AllSensors::readGPS() {
+    while (gpsSerial.available() > 0) {
+        gps.encode(gpsSerial.read());
+    }
+
+    lat = gps.location.lat();
+    lon = gps.location.lng();
+    alt = gps.altitude.meters();
+}   
+
+
 void AllSensors::update() {
     // --- GPS Update ---
     while (gpsSerial.available() > 0) {

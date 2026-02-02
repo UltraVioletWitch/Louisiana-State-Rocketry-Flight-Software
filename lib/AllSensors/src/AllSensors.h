@@ -14,11 +14,18 @@ public:
     bool begin();
 
     // Call repeatedly in loop
+    void readBMP();
+    void readGPS();
+    void readIMU();
     void update();
 
     // Manually set BMP sea-level pressure
     void calibrateBMPSeaLevel(void);
 
+    float AccelX, AccelY, AccelZ;
+    float gyroX, gyroY, gyroZ;
+    float pressure, temp;
+    float lat, lon, alt;
 private:
     // GPS
     HardwareSerial &gpsSerial;
