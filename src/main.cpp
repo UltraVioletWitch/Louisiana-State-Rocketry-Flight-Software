@@ -1,72 +1,25 @@
 #include <Arduino.h>
-#include "SensorManager.h"
+#include "AllSensors.h"
 
-// Chip Select pins
-constexpr uint8_t LSM_CS = 10;
-constexpr uint8_t BMP_CS = 9;
-
-SensorManager sensors(LSM_CS, BMP_CS);
-
-unsigned long lastPrint = 0;
+// GPS on Serial2, LSM CS=10, BMP CS=9
+AllSensors sensors(Serial2, 9600, 10, 9);
 
 void setup() {
-  Serial.begin(115200);
-  while (!Serial && millis() < 3000);
+    Serial.begin(115200);
+    if (!sensors.begin()) {
+        Serial.println(F("One or more sensors failed to initialize!"));
+    }
 
-  Serial.println("Teensy 4.1 Sensor System");
-
-  if (!sensors.begin()) {
-    Serial.println("Sensor init failed");
-    while (1);
-  }
-
-  Serial.println("All sensors initialized");
+    // Start BMP auto-calibration: discard 10 readings, average next 50
+    sensors.startBMPSeaLevelAutoCalibration(50);
 }
 
 void loop() {
-  sensors.update();
+    sensors.update(); // prints parsed values every second
 
-  if (millis() - lastPrint > 200) {
-    lastPrint = millis();
-
-    Serial.println("---- DATA ----");
-
-    Serial.print("Accel g: ");
-    Serial.print(sensors.ax, 3); Serial.print(", ");
-    Serial.print(sensors.ay, 3); Serial.print(", ");
-    Serial.println(sensors.az, 3);
-
-    Serial.print("Gyro dps: ");
-    Serial.print(sensors.gx, 3); Serial.print(", ");
-    Serial.print(sensors.gy, 3); Serial.print(", ");
-    Serial.println(sensors.gz, 3);
-
-    Serial.print("Temp C: ");
-    Serial.println(sensors.temperature, 2);
-
-    Serial.print("Pressure hPa: ");
-    Serial.println(sensors.pressure_hPa, 2);
-
-    Serial.print("Altitude m: ");
-    Serial.println(sensors.altitude_m, 2);
-
-    if (sensors.gpsFix) {
-      Serial.print("Lat: ");
-      Serial.println(sensors.latitude, 6);
-
-      Serial.print("Lon: ");
-      Serial.println(sensors.longitude, 6);
-
-      Serial.print("GPS Alt m: ");
-      Serial.println(sensors.gpsAltitude);
-
-      Serial.print("Sats: ");
-      Serial.println(sensors.satellites);
-    } else {
-      Serial.println("GPS: No fix");
+    // Optional: indicate calibration status
+    if (!sensors.isBMPAutoCalibrated()) {
+        Serial.println(F("BMP auto-calibration in progress..."));
     }
-
-    Serial.println();
-  }
 }
 
