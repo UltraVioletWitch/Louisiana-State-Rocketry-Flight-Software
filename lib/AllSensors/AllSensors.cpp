@@ -3,9 +3,7 @@
 
 // Constructor
 AllSensors::AllSensors(HardwareSerial &serial, uint32_t baud, int lsmCSPin, int bmpCSPin)
-    : gpsSerial(serial), gpsBaud(baud), lsmCS(lsmCSPin), bmpCS(bmpCSPin),
-      lastPrint(0), bmpSeaLevel_hPa(1013.25),
-      bmpAutoCalibrating(false), bmpDiscardCount(0), bmpReadingsCount(0), bmpPressureSum(0), bmpCalibrationReadings(50) {}
+    : gpsSerial(serial), gpsBaud(baud), lsmCS(lsmCSPin), bmpCS(bmpCSPin) {}
 
 // Initialize sensors
 bool AllSensors::begin() {
@@ -32,29 +30,26 @@ bool AllSensors::begin() {
         Serial.println(F("BMP390 OK"));
     }
 
+    calibrateBMPSeaLevel();
+
     return success;
 }
 
 // Manually calibrate BMP sea-level pressure
-void AllSensors::calibrateBMPSeaLevel(float seaLevel_hPa) {
-    bmpSeaLevel_hPa = seaLevel_hPa;
+void AllSensors::calibrateBMPSeaLevel(void) {
+    for (int i = 0; i < 10; i++) {
+        bmp.performReading();
+        delay(100);
+    }
+
+    float sumPressure = 0;
+    for (int i = 0; i < 10; i++) {
+        bmp.performReading();
+        sumPressure += bmp.pressure / 100.0;
+    }
+    bmpSeaLevel_hPa = sumPressure / 10;
     Serial.print(F("BMP sea-level pressure manually set to: "));
     Serial.println(bmpSeaLevel_hPa);
-}
-
-// Start auto-calibration
-void AllSensors::startBMPSeaLevelAutoCalibration(int readingsToAverage) {
-    bmpAutoCalibrating = true;
-    bmpDiscardCount = 0;
-    bmpReadingsCount = 0;
-    bmpPressureSum = 0;
-    bmpCalibrationReadings = readingsToAverage;
-    Serial.println(F("Starting BMP sea-level auto-calibration..."));
-}
-
-// Check if auto-calibration is complete
-bool AllSensors::isBMPAutoCalibrated() {
-    return !bmpAutoCalibrating;
 }
 
 // Update all sensors
@@ -69,26 +64,7 @@ void AllSensors::update() {
     lsm.getEvent(&accel, &gyro, &temp);
 
     // --- BMP Update ---
-    if (bmp.performReading()) {
-        float pressure_hPa = bmp.pressure / 100.0;
-
-        // Auto-calibration routine
-        if (bmpAutoCalibrating) {
-            if (bmpDiscardCount < 10) {
-                bmpDiscardCount++; // discard first 10 readings
-            } else if (bmpReadingsCount < bmpCalibrationReadings) {
-                bmpPressureSum += pressure_hPa;
-                bmpReadingsCount++;
-            }
-
-            if (bmpReadingsCount >= bmpCalibrationReadings) {
-                bmpSeaLevel_hPa = bmpPressureSum / bmpReadingsCount;
-                bmpAutoCalibrating = false;
-                Serial.print(F("BMP sea-level auto-calibration done: "));
-                Serial.println(bmpSeaLevel_hPa);
-            }
-        }
-    }
+    bmp.performReading();
 
     // --- Print all sensor data every 1 second ---
     if (millis() - lastPrint > 1000) {
@@ -115,8 +91,6 @@ void AllSensors::update() {
         Serial.print(F("Gyro [rad/s] X: ")); Serial.print(gyro.gyro.x);
         Serial.print(F(" Y: ")); Serial.print(gyro.gyro.y);
         Serial.print(F(" Z: ")); Serial.println(gyro.gyro.z);
-
-        Serial.print(F("Temp [C]: ")); Serial.println(temp.temperature);
 
         // BMP390
         Serial.print(F("Pressure [Pa]: ")); Serial.println(bmp.pressure);

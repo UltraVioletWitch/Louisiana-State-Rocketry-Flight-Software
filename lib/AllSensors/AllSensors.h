@@ -17,13 +17,7 @@ public:
     void update();
 
     // Manually set BMP sea-level pressure
-    void calibrateBMPSeaLevel(float seaLevel_hPa);
-
-    // Start auto-calibration for BMP sea-level pressure
-    void startBMPSeaLevelAutoCalibration(int readingsToAverage = 50);
-
-    // Returns true if BMP auto-calibration is done
-    bool isBMPAutoCalibrated();
+    void calibrateBMPSeaLevel(void);
 
 private:
     // GPS
@@ -40,13 +34,6 @@ private:
     int bmpCS;
     float bmpSeaLevel_hPa;
 
-    // Auto-calibration state
-    bool bmpAutoCalibrating;
-    int bmpDiscardCount;
-    int bmpReadingsCount;
-    float bmpPressureSum;
-    int bmpCalibrationReadings;
-
-    unsigned long lastPrint;
+    double lastPrint = 0;
 };
 
