@@ -4,7 +4,6 @@
 #include <Adafruit_LSM6DSO32.h>
 #include <Adafruit_BMP3XX.h>
 #include <TinyGPS++.h>
-#include <LSR_Struct.h>
 
 class AllSensors {
 public:

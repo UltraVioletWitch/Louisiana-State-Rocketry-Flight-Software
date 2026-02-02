@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include "AllSensors.h"
+#include "Kalman.h"
 
 // GPS on Serial2, LSM CS=10, BMP CS=9
 AllSensors sensors(Serial2, 9600, 10, 9);
