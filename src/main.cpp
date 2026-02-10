@@ -18,6 +18,7 @@ float altRing[RING_SIZE];
 
 // detect function prototypes
 bool launchDetect(LSR_Struct*, float*, float*, int, int);
+bool burnoutDetect(LSR_Struct*, float*, float*, int, int);
 bool apogeeDetect(LSR_Struct*, float*, float*, int, int);
 bool landingDetect(LSR_Struct*, float*, float*, int, int);
 
@@ -37,18 +38,26 @@ void loop() {
     switch (data.flightState) {
         case PRE_LAUNCH:
             if (launchDetect(&data, altRing, accelRing, RING_SIZE, ringPtr)) {
-                data.flightState = ASCENT;
+                data.flightState = BURN;
                 break;
             } else {
                 /* Pre-Launch Code goes here */
                 break;
             }
-        case ASCENT:
+        case BURN:
+            if (burnoutDetect(&data, altRing, accelRing, RING_SIZE, ringPtr)) {
+                data.flightState = COAST;
+                break;
+            } else {
+                /* Burn code here */
+                break;
+            }
+        case COAST:
             if (apogeeDetect(&data, altRing, accelRing, RING_SIZE, ringPtr)) {
                 data.flightState = DESCENT;
                 break;
             } else {
-                /* Ascent code here */
+                /* Coast code here */
                 break;
             }
         case DESCENT:
@@ -89,6 +98,15 @@ void loop() {
 }
 
 bool launchDetect(
+        LSR_Struct *data, 
+        float *altRing, 
+        float *accelRing, 
+        int ringSize, 
+        int ringPtr) {
+    return true;
+}
+
+bool burnoutDetect(
         LSR_Struct *data, 
         float *altRing, 
         float *accelRing, 

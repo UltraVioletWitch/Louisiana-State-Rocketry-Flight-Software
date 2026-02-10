@@ -4,7 +4,8 @@
 
 enum State {
     PRE_LAUNCH,
-    ASCENT,
+    BURN,
+    COAST,
     DESCENT,
     LANDED
 };
