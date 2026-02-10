@@ -29,8 +29,7 @@ void setup() {
 
     /* Setup code here */
 
-    accelTimer = millis();
-    altTimer = millis();
+    accelAltTimer = millis();
     GPSTimer = millis();
 }
 
@@ -72,7 +71,11 @@ void loop() {
     if (millis() - accelAltTimer > (1.0 / accelAltHz) * 1000) {
         /* accel code */
         /* altimeter code */
-        ringPtr++;
+        if (ringPtr == RING_SIZE - 1) {
+            ringPtr = 0;
+        } else {
+            ringPtr++;
+        }
         accelRing[ringPtr] = data.AccelZ;
         altRing[ringPtr] = data.PosZ;
         accelAltTimer = millis();
