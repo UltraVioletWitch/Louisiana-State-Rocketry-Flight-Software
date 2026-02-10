@@ -95,7 +95,6 @@ void loop() {
         /* GPS code */
         GPSTimer = millis();
     }
-    
 }
 
 bool launchDetect(
