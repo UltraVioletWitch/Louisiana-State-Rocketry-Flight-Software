@@ -12,6 +12,5 @@ void setup() {
 }
 
 void loop() {
-    sensors.update(); // prints parsed values every second
-}
 
+}
