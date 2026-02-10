@@ -13,7 +13,9 @@ enum State {
 
 State flightState = PRE_LAUNCH;
 
-bool launchDetect(&sensor);
+bool launchDetect(AllSensors);
+bool apogeeDetect(AllSensors);
+bool landingDetect(AllSensors);
 
 void setup() {
     Serial.begin(115200);
@@ -25,21 +27,21 @@ void setup() {
 void loop() {
     switch (flightState) {
         case PRE_LAUNCH:
-            if (launchDetect(&sensors)) {
+            if (launchDetect(sensors)) {
                 flightState = ASCENT;
                 break;
             } else {
                 break;
             }
         case ASCENT:
-            if (apogeeDetect(&sensors)) {
+            if (apogeeDetect(sensors)) {
                 flightState = DESCENT;
                 break;
             } else {
                 break;
             }
         case DESCENT:
-            if (landingDetect(&sensors)) {
+            if (landingDetect(sensors)) {
                 flightState = LANDED;
                 break;
             } else {
@@ -48,6 +50,18 @@ void loop() {
         case LANDED:
             break;
         default:
-            
+            break;
     }
+}
+
+bool launchDetect(AllSensors s) {
+    return true;
+}
+
+bool apogeeDetect(AllSensors s) {
+    return true;
+}
+
+bool landingDetect(AllSensors s) {
+    return true;
 }
