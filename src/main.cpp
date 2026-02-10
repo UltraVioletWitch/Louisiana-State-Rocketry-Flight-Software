@@ -13,14 +13,16 @@ LSR_Struct data;
 // ring buffer
 const int RING_SIZE = 8;
 int ringPtr = 0;
-float accelRing[RING_SIZE];
-float altRing[RING_SIZE];
+LSR_Struct ring[RING_SIZE];
 
 // detect function prototypes
-bool launchDetect(LSR_Struct*, float*, float*, int, int);
-bool burnoutDetect(LSR_Struct*, float*, float*, int, int);
-bool apogeeDetect(LSR_Struct*, float*, float*, int, int);
-bool landingDetect(LSR_Struct*, float*, float*, int, int);
+bool launchDetect(LSR_Struct*, int, int);
+bool burnoutDetect(LSR_Struct*, int, int);
+bool apogeeDetect(LSR_Struct*, int, int);
+bool landingDetect(LSR_Struct*, int, int);
+
+void writeRing(float*, float*, int, int);
+void writePacket();
 
 void setup() {
     Serial.begin(115200);
@@ -37,7 +39,7 @@ void setup() {
 void loop() {
     switch (data.flightState) {
         case PRE_LAUNCH:
-            if (launchDetect(&data, altRing, accelRing, RING_SIZE, ringPtr)) {
+            if (launchDetect(&data, RING_SIZE, ringPtr)) {
                 data.flightState = BURN;
                 break;
             } else {
@@ -45,7 +47,7 @@ void loop() {
                 break;
             }
         case BURN:
-            if (burnoutDetect(&data, altRing, accelRing, RING_SIZE, ringPtr)) {
+            if (burnoutDetect(&data, RING_SIZE, ringPtr)) {
                 data.flightState = COAST;
                 break;
             } else {
@@ -53,7 +55,7 @@ void loop() {
                 break;
             }
         case COAST:
-            if (apogeeDetect(&data, altRing, accelRing, RING_SIZE, ringPtr)) {
+            if (apogeeDetect(&data, RING_SIZE, ringPtr)) {
                 data.flightState = DESCENT;
                 break;
             } else {
@@ -61,7 +63,7 @@ void loop() {
                 break;
             }
         case DESCENT:
-            if (landingDetect(&data, altRing, accelRing, RING_SIZE, ringPtr)) {
+            if (landingDetect(&data, RING_SIZE, ringPtr)) {
                 data.flightState = LANDED;
                 break;
             } else {
@@ -85,8 +87,7 @@ void loop() {
         } else {
             ringPtr++;
         }
-        accelRing[ringPtr] = data.AccelZ;
-        altRing[ringPtr] = data.PosZ;
+        ring[ringPtr] = data;
         accelAltTimer = millis();
     }
 
@@ -98,18 +99,24 @@ void loop() {
 }
 
 bool launchDetect(
-        LSR_Struct *data, 
-        float *altRing, 
-        float *accelRing, 
+        LSR_Struct *ring, 
         int ringSize, 
         int ringPtr) {
-    return true;
+    int nextPtr;
+    if (ringPtr == RING_SIZE - 1) {
+        nextPtr = 0;
+    } else {
+        nextPtr = ringPtr + 1;
+    }
+
+    if (ring[ringPtr].AccelZ - ring[nextPtr].AccelZ > 10) {
+        return true;
+    }
+    return false;
 }
 
 bool burnoutDetect(
         LSR_Struct *data, 
-        float *altRing, 
-        float *accelRing, 
         int ringSize, 
         int ringPtr) {
     return true;
@@ -117,8 +124,6 @@ bool burnoutDetect(
 
 bool apogeeDetect(
         LSR_Struct *data, 
-        float *altRing, 
-        float *accelRing, 
         int ringSize,
         int ringPtr) {
     return true;
@@ -126,8 +131,6 @@ bool apogeeDetect(
 
 bool landingDetect(
         LSR_Struct *data, 
-        float *altRing, 
-        float *accelRing, 
         int ringSize,
         int ringPtr) {
     return true;
