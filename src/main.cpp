@@ -1,21 +1,13 @@
-#include <Arduino.h>
-#include <future>
 #include "AllSensors.h"
+#include "LSR_Struct.h"
 
 // GPS on Serial2, LSM CS=10, BMP CS=9
 AllSensors sensors(Serial2, 9600, 10, 9);
-enum State {
-    PRE_LAUNCH,
-    ASCENT,
-    DESCENT,
-    LANDED
-};
+LSR_Struct data;
 
-State flightState = PRE_LAUNCH;
-
-bool launchDetect(AllSensors);
-bool apogeeDetect(AllSensors);
-bool landingDetect(AllSensors);
+bool launchDetect(LSR_Struct);
+bool apogeeDetect(LSR_Struct);
+bool landingDetect(LSR_Struct);
 
 void setup() {
     Serial.begin(115200);
@@ -25,24 +17,24 @@ void setup() {
 }
 
 void loop() {
-    switch (flightState) {
+    switch (data.flightState) {
         case PRE_LAUNCH:
-            if (launchDetect(sensors)) {
-                flightState = ASCENT;
+            if (launchDetect(data)) {
+                data.flightState = ASCENT;
                 break;
             } else {
                 break;
             }
         case ASCENT:
-            if (apogeeDetect(sensors)) {
-                flightState = DESCENT;
+            if (apogeeDetect(data)) {
+                data.flightState = DESCENT;
                 break;
             } else {
                 break;
             }
         case DESCENT:
-            if (landingDetect(sensors)) {
-                flightState = LANDED;
+            if (landingDetect(data)) {
+                data.flightState = LANDED;
                 break;
             } else {
                 break;
@@ -54,14 +46,14 @@ void loop() {
     }
 }
 
-bool launchDetect(AllSensors s) {
+bool launchDetect(LSR_Struct data) {
     return true;
 }
 
-bool apogeeDetect(AllSensors s) {
+bool apogeeDetect(LSR_Struct data) {
     return true;
 }
 
-bool landingDetect(AllSensors s) {
+bool landingDetect(LSR_Struct data) {
     return true;
 }

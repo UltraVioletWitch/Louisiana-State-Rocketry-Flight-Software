@@ -2,6 +2,20 @@
 
 #include <Arduino.h>
 
+enum State {
+    PRE_LAUNCH,
+    ASCENT,
+    DESCENT,
+    LANDED
+};
+
+enum RollState {
+    OFF,
+    CLOCKWISE,
+    COUNTERCLOCKWISE,
+    HOLDING
+};
+
 typedef struct LSR_Struct {
   uint32_t TimeStamp;
   float AccelX, AccelY, AccelZ;
@@ -11,5 +25,6 @@ typedef struct LSR_Struct {
   float Theta, Phi, Psi;
   float Pressure;
   float Temp;
-  uint8_t State;
+  State flightState = PRE_LAUNCH;
+  RollState rollControlState = OFF;
 } E22_Packet;
