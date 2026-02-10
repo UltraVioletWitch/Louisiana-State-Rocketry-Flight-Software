@@ -5,9 +5,14 @@
 AllSensors sensors(Serial2, 9600, 10, 9);
 LSR_Struct data;
 
-bool launchDetect(LSR_Struct);
-bool apogeeDetect(LSR_Struct);
-bool landingDetect(LSR_Struct);
+const int RING_SIZE = 8;
+int ringPtr = 0;
+float accelRing[RING_SIZE];
+float altRing[RING_SIZE];
+
+bool launchDetect(LSR_Struct*, float*, float*, int, int);
+bool apogeeDetect(LSR_Struct*, float*, float*, int, int);
+bool landingDetect(LSR_Struct*, float*, float*, int, int);
 
 void setup() {
     Serial.begin(115200);
@@ -19,21 +24,22 @@ void setup() {
 void loop() {
     switch (data.flightState) {
         case PRE_LAUNCH:
-            if (launchDetect(data)) {
+            if (launchDetect(&data, altRing, accelRing, RING_SIZE, ringPtr)) {
                 data.flightState = ASCENT;
                 break;
             } else {
+                /* Pre-Launch Code goes here */
                 break;
             }
         case ASCENT:
-            if (apogeeDetect(data)) {
+            if (apogeeDetect(&data, altRing, accelRing, RING_SIZE, ringPtr)) {
                 data.flightState = DESCENT;
                 break;
             } else {
                 break;
             }
         case DESCENT:
-            if (landingDetect(data)) {
+            if (landingDetect(&data, altRing, accelRing, RING_SIZE, ringPtr)) {
                 data.flightState = LANDED;
                 break;
             } else {
@@ -46,14 +52,29 @@ void loop() {
     }
 }
 
-bool launchDetect(LSR_Struct data) {
+bool launchDetect(
+        LSR_Struct *data, 
+        float *altRing, 
+        float *accelRing, 
+        int ringSize, 
+        int ringPtr) {
     return true;
 }
 
-bool apogeeDetect(LSR_Struct data) {
+bool apogeeDetect(
+        LSR_Struct *data, 
+        float *altRing, 
+        float *accelRing, 
+        int ringSize,
+        int ringPtr) {
     return true;
 }
 
-bool landingDetect(LSR_Struct data) {
+bool landingDetect(
+        LSR_Struct *data, 
+        float *altRing, 
+        float *accelRing, 
+        int ringSize,
+        int ringPtr) {
     return true;
 }
