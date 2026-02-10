@@ -79,6 +79,7 @@ void AllSensors::readGPS() {
         gps.encode(gpsSerial.read());
     }
 
+    isValid = gps.location.isValid();
     lat = gps.location.lat();
     lon = gps.location.lng();
     alt = gps.altitude.meters();

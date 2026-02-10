@@ -22,10 +22,12 @@ public:
     // Manually set BMP sea-level pressure
     void calibrateBMPSeaLevel(void);
 
+    bool isValid;
     float AccelX, AccelY, AccelZ;
     float gyroX, gyroY, gyroZ;
     float pressure, temp;
     float lat, lon, alt;
+    float bmpSeaLevel_hPa;
 private:
     // GPS
     HardwareSerial &gpsSerial;
@@ -39,7 +41,6 @@ private:
     // BMP390
     Adafruit_BMP3XX bmp;
     int bmpCS;
-    float bmpSeaLevel_hPa;
 
     double lastPrint = 0;
 };
