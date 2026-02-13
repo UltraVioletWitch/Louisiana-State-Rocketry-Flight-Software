@@ -1,7 +1,6 @@
 #pragma once
 
 #include <Arduino.h>
-#include <vector>
 
 enum State {
     PRE_LAUNCH,
