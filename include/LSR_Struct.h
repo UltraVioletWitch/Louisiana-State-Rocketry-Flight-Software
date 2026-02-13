@@ -36,11 +36,13 @@ class RingBuffer {
     private:
         LSR_Struct ring[N];
         int ring_ptr = 0;
+        bool full = false;
 
     public:
         void push(LSR_Struct packet) {
             if (ring_ptr == N - 1) {
                 ring_ptr = 0;
+                full = true;
             } else {
                 ring_ptr++;
             }
@@ -48,8 +50,22 @@ class RingBuffer {
             ring[ring_ptr] = packet;
         }
     
-        LSR_Struct get(void) const {
+        LSR_Struct getFirst(void) const {
             return ring[ring_ptr];
         }
-    
+
+        LSR_Struct getLast(void) const {
+            int last_ptr;
+            if (ring_ptr == N - 1) {
+                last_ptr = 0;
+            } else {
+                last_ptr = ring_ptr + 1;
+            }
+
+            return ring[last_ptr];
+        }
+
+        bool isFull(void) const {
+            return full;
+        }
 };
