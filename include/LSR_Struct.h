@@ -67,4 +67,8 @@ class RingBuffer {
         bool isFull(void) const {
             return full;
         }
+
+        LSR_Struct getElement(int index) const {
+            return ring[index];
+        }
 };

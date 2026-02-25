@@ -90,6 +90,8 @@ void loop() {
 }
 
 bool launchDetect(const RingBuffer<RING_SIZE>& ring) {
+    data = ring.getFirst();
+    Serial.print(data.PosZ);
     return true;
 }
 
