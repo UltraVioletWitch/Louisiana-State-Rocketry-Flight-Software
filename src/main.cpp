@@ -20,6 +20,13 @@ bool burnoutDetect(const RingBuffer<RING_SIZE>&);
 bool apogeeDetect(const RingBuffer<RING_SIZE>&);
 bool landingDetect(const RingBuffer<RING_SIZE>&);
 
+// time logs
+unsigned long launchTime;
+unsigned long burnTime;
+unsigned long apogeeTime;
+unsigned long landTime;
+
+
 void writePacket();
 
 void setup() {
@@ -39,6 +46,8 @@ void loop() {
         case PRE_LAUNCH:
             if (launchDetect(ring)) {
                 data.flightState = BURN;
+                launchTime = millis();
+                /* code to log entire ring goes here */
                 break;
             } else {
                 /* Pre-Launch Code goes here */
@@ -47,6 +56,7 @@ void loop() {
         case BURN:
             if (burnoutDetect(ring)) {
                 data.flightState = COAST;
+                burnTime = millis();
                 break;
             } else {
                 /* Burn code here */
@@ -55,6 +65,7 @@ void loop() {
         case COAST:
             if (apogeeDetect(ring)) {
                 data.flightState = DESCENT;
+                apogeeTime = millis();
                 break;
             } else {
                 /* Coast code here */
@@ -63,6 +74,7 @@ void loop() {
         case DESCENT:
             if (landingDetect(ring)) {
                 data.flightState = LANDED;
+                landTime = millis();
                 break;
             } else {
                 /* Descent code here */
