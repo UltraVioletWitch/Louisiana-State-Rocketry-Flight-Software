@@ -6,6 +6,8 @@
 #include <TinyGPS++.h>
 #include <LSR_Struct.h>
 
+#define SEALEVELPRESSURE_HPA (1013.25)
+
 class AllSensors {
 public:
     // Constructor: GPS UART, baud, LSM CS, BMP CS

@@ -17,6 +17,41 @@ enum RollState {
     HOLDING
 };
 
+enum Acceleration {
+    G_1 = 10,      // 9.81 m/s²
+    G_2 = 20,      // 19.62 m/s²
+    G_3 = 29,      // 29.43 m/s²
+    G_4 = 39,      // 39.24 m/s²
+    G_5 = 49,      // 49.05 m/s²
+    G_6 = 59,      // 58.86 m/s²
+    G_7 = 69,      // 68.67 m/s²
+    G_8 = 78,      // 78.48 m/s²
+    G_9 = 88,      // 88.29 m/s²
+    G_10 = 98,     // 98.1 m/s²
+    G_11 = 108,    // 107.91 m/s²
+    G_12 = 118,    // 117.72 m/s²
+    G_13 = 128,    // 127.53 m/s²
+    G_14 = 137,    // 137.34 m/s²
+    G_15 = 147,    // 147.15 m/s²
+    G_16 = 157,    // 156.96 m/s²
+    G_17 = 167,    // 166.77 m/s²
+    G_18 = 177,    // 176.58 m/s²
+    G_19 = 186,    // 186.39 m/s²
+    G_20 = 196,    // 196.2 m/s²
+    G_21 = 206,    // 206.01 m/s²
+    G_22 = 216,    // 215.82 m/s²
+    G_23 = 226,    // 225.63 m/s²
+    G_24 = 235,    // 235.44 m/s²
+    G_25 = 245,    // 245.25 m/s²
+    G_26 = 255,    // 255.06 m/s²
+    G_27 = 265,    // 264.87 m/s²
+    G_28 = 275,    // 274.68 m/s²
+    G_29 = 284,    // 284.49 m/s²
+    G_30 = 294,    // 294.3 m/s²
+    G_31 = 304,    // 304.11 m/s²
+    G_32 = 314     // 313.92 m/s²
+};
+
 typedef struct LSR_Struct {
   uint32_t TimeStamp;
   float AccelX, AccelY, AccelZ;
@@ -69,6 +104,19 @@ class RingBuffer {
         }
 
         LSR_Struct getElement(int index) const {
-            return ring[index];
+            if(index < 0 || index >= N) {
+                return ring[ring_ptr];
+            } else {
+                return ring[index];
+            }
+            
+        }
+
+        operator LSR_Struct[](int index) const {
+            if(index < 0 || index >= N) {
+                return ring[ring_ptr];
+            } else {
+                return ring[index];
+            }
         }
 };
