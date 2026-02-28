@@ -1,6 +1,7 @@
 #include "AllSensors.h"
 #include "LSR_Struct.h"
 #include <RadioLib.h>
+#include <SD.h>
 
 // GPS on Serial2, LSM CS=10, BMP CS=9
 AllSensors sensors(Serial2, 9600, 10, 9);
@@ -27,10 +28,20 @@ unsigned long burnTime;
 unsigned long apogeeTime;
 unsigned long landTime;
 
+// SD card 
+File loggingFile;
+
 // radio setup
 SX1262 radio = new Module(SCK, MISO, MOSI, 7);
+const uint8_t radioResetPin = 32;
+const uint8_t radioBusyPin = 31;
+const uint8_t radioDIO1Pin = 30;
+const uint8_t radioDIO2Pin = 27;
 const float EBYTE_FREQ = 912.3;
 
+// Initalized variables 
+bool SDcardPresent = false;
+bool radioPresent = false;
 
 void writePacket();
 
@@ -41,7 +52,22 @@ void setup() {
     }
 
     /* Setup code here */
-    radio.begin(EBYTE_FREQ);
+    int16_t radioState = radio.begin(EBYTE_FREQ);
+    if(radioState != RADIOLIB_ERR_NONE) {
+        Serial.printf("Failed to initialize radio, error code: %d\n", radioState);
+    } else {
+        radioPresent = true;
+    }
+
+    if(!SD.begin(BUILTIN_SDCARD)) {
+        Serial.printf("Failed to initialize SD card!\n");
+    } else {
+        SDcardPresent = true;
+        if (!SD.exists("/logs")) {
+            SD.mkdir("/logs");
+        }
+        loggingFile = SD.open("/logs/log.txt", FILE_WRITE | FILE_READ);
+    }
 
     accelAltTimer = millis();
     GPSTimer = millis();
@@ -54,6 +80,12 @@ void loop() {
                 data.flightState = BURN;
                 launchTime = millis();
                 /* code to log entire ring goes here */
+
+                if(!SDcardPresent) {
+                    break;
+                }
+
+
                 break;
             } else {
                 /* Pre-Launch Code goes here */
@@ -111,49 +143,38 @@ void loop() {
 }
 
 bool launchDetect(const RingBuffer<RING_SIZE>& ring) {
-    // Use bitwise operation to track the accepted thresholds for each sensor, 
-    // and only return true if all thresholds are passed within a certain time frame.
-    // This is to prevent false positives from a single sensor.
-    static uint8_t trackingBit;
-    static uint64_t accelThreshold;
-    static uint64_t bmpThreshold;
-    
+    // Save the current sensor requirements for lauch detection
+    const Acceleration accelThreshold = Acceleration::G_3;
+    const uint8_t samplesRequired = 100;
+    const uint8_t altimeterThreshold = 5;
 
+    static uint8_t accelCount;
     data = ring.getFirst();
-    Serial.print(data.PosZ);
+    
+    // Get the current data from the Struct
+    float currentAccelX = data.AccelX;
+    float currentAccelY = data.AccelY;
+    float currentAccelZ = data.AccelZ;
+    float currentAltitudeBMP = sensors.getAltitudeBMP() - sensors.getSeaLevelPressure();
 
-    // Check if the current acceleration exceeds the threshold for launch.
-    // If it does, set the corresponding bit in accelThreshold.
-    // If it isn't, clear the threshold.
-    if(data.VelZ > Acceleration::G_14) {
-        accelThreshold |= (1 << trackingBit);
+    // Check if the vertical acceleration is above the threshold, 
+    // also check if the other axes are not too high to prevent horizontal movement from triggering launch detection.
+    if(currentAccelZ >= accelThreshold && (currentAccelX < accelThreshold || currentAccelY < accelThreshold)) {
+        accelCount++;
     } else {
-        accelThreshold = 0;
-    }
-
-    // Check if the current pressure is below the threshold for launch.
-    // If it is, set the corresponding bit in bmpThreshold.
-    // If it isn't, clear the threshold.
-    if(data.Pressure < ring.getLast().Pressure) {
-        bmpThreshold |= (1 << trackingBit);
-    } else {
-        bmpThreshold = 0;
-    }
-
-    // If either threshold is not met, reset the all variables and return false.
-    if(!accelThreshold || !bmpThreshold) {
-        trackingBit = 0;
-        accelThreshold = 0;
-        bmpThreshold = 0;
+        accelCount = 0;
         return false;
     }
+    
+    // TODO: Add a check for so that the angles from the acelerometer is no greater than 45 degrees.
+    // The rocket will launch fairly verically
 
-    if(accelThreshold == UINT64_MAX && bmpThreshold == UINT64_MAX) {
-        trackingBit = 0;
+    // Check if we have enough samples from the accelerometer,
+    // also check if the altimter is above the height threshold to prevent false positives from the accelerometer.
+    if(accelCount >= samplesRequired && currentAltitudeBMP > altimeterThreshold) {
         return true;
     }
     
-    trackingBit++;
     return false;
 }
 
@@ -166,23 +187,32 @@ bool apogeeDetect(const RingBuffer<RING_SIZE>& ring) {
 }
 
 bool landingDetect(const RingBuffer<RING_SIZE>& ring) {
+    const Acceleration accelThreshold = Acceleration::G_1;
+    const float velocityThreshold = 1.0;
+    const float positionThreshold = 3.0;
+    const float pressureThreshold = 5.0;
+    
     data = ring.getFirst();
 
     // Check if the current acceleration for x,y,z exceeds the threshold for landing.
     // If it does, return false.
-    if(data.VelX > Acceleration::G_1 && data.VelY > Acceleration::G_1 && data.VelZ > Acceleration::G_1) {
+    if(data.AccelX > accelThreshold || data.AccelY > accelThreshold || data.AccelZ > accelThreshold) {
+        return false;
+    }
+
+    if(abs(data.VelX -  ring.getLast().VelX) > velocityThreshold || abs(data.VelY - ring.getLast().VelY) > velocityThreshold || abs(data.VelZ - ring.getLast().VelZ) > velocityThreshold) {
         return false;
     }
 
     // Check if the current position for the z-axis is within the threshold for landing.
     // If it isn't, return false.
-    if(abs(data.PosZ - ring.getLast().PosZ) > 3) {
+    if(abs(data.PosZ - ring.getLast().PosZ) > positionThreshold) {
         return false;
     }
 
     // Check if the current pressure is within the threshold for landing.
     // If it isn't, return false.
-    if(abs(data.Pressure - ring.getLast().Pressure) < 5) {
+    if(abs(data.Pressure - sensors.getSeaLevelPressure()) > pressureThreshold) {
         return false;
     }
 

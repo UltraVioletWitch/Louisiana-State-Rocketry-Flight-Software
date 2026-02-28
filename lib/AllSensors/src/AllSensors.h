@@ -22,6 +22,12 @@ public:
     // Manually set BMP sea-level pressure
     void calibrateBMPSeaLevel(void);
 
+    // Get the altitude from the BMP
+    const float getAltitudeBMP(void);
+
+    // Get the sea-level pressure from the BMP
+    const float getSeaLevelPressure(void); 
+
 private:
     // GPS
     HardwareSerial &gpsSerial;

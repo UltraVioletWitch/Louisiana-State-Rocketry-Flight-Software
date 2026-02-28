@@ -53,6 +53,17 @@ void AllSensors::calibrateBMPSeaLevel(void) {
     Serial.println(bmpSeaLevel_hPa);
 }
 
+// Get the altitude from the BMP
+const float AllSensors::getAltitudeBMP(void) {
+    float bmpPressure_hPa = bmp.pressure / 100.0;
+    float altitude_m = 44330.0 * (1.0 - pow(bmpPressure_hPa / bmpSeaLevel_hPa, 0.1903));
+    return altitude_m;
+}
+
+const float AllSensors::getSeaLevelPressure(void) {
+    return bmpSeaLevel_hPa;
+}
+
 // Update all sensors
 void AllSensors::update() {
     // --- GPS Update ---

@@ -112,7 +112,7 @@ class RingBuffer {
             
         }
 
-        operator LSR_Struct[](int index) const {
+        LSR_Struct operator[](int index) const {
             if(index < 0 || index >= N) {
                 return ring[ring_ptr];
             } else {
