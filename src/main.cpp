@@ -27,9 +27,13 @@ unsigned long launchTime;
 unsigned long burnTime;
 unsigned long apogeeTime;
 unsigned long landTime;
+IntervalTimer SDTimer;
+const uint32_t SDWriteFreqMicroseconds = 10000;
 
 // SD card 
 File loggingFile;
+void writePacketToSD(const RingBuffer<RING_SIZE>& ring);
+void SDWriteTimerCallback();
 
 // radio setup
 SX1262 radio = new Module(SCK, MISO, MOSI, 7);
@@ -42,8 +46,7 @@ const float EBYTE_FREQ = 912.3;
 // Initalized variables 
 bool SDcardPresent = false;
 bool radioPresent = false;
-
-void writePacket();
+bool writeToSD = false;
 
 void setup() {
     Serial.begin(115200);
@@ -60,13 +63,21 @@ void setup() {
     }
 
     if(!SD.begin(BUILTIN_SDCARD)) {
-        Serial.printf("Failed to initialize SD card!\n");
+        Serial.printf(F("Failed to initialize SD card!\n"));
     } else {
         SDcardPresent = true;
         if (!SD.exists("/logs")) {
             SD.mkdir("/logs");
         }
         loggingFile = SD.open("/logs/log.txt", FILE_WRITE | FILE_READ);
+    }
+
+    // Create a timer that will set a flag to write to the SD card at a given frequency
+    // I am using this for testing. It's also non-blocking, so it won't interfere with the main loop.
+    if(SDTimer.begin(SDWriteTimerCallback, SDWriteFreqMicroseconds)) {
+        Serial.println(F("SD write timer initialized successfully."));
+    } else {
+        Serial.println(F("Failed to initialize SD write timer."));
     }
 
     accelAltTimer = millis();
@@ -84,7 +95,6 @@ void loop() {
                 if(!SDcardPresent) {
                     break;
                 }
-
 
                 break;
             } else {
@@ -119,6 +129,15 @@ void loop() {
                 break;
             }
         case LANDED:
+            
+            // Close the SD card, it is no longer needed and having it open risk corruption
+            if(SDcardPresent) {
+                loggingFile.flush();
+                loggingFile.close();
+                SDcardPresent = false;
+            }
+            
+            // Transmit the position of where the rocket landed
             int16_t landingTransmitStatus = radio.startTransmit((uint8_t*)&data, sizeof(data));
             if (landingTransmitStatus != RADIOLIB_ERR_NONE) {
                 Serial.printf("Failed to start transmission, error code: %d\n", landingTransmitStatus);
@@ -200,6 +219,8 @@ bool landingDetect(const RingBuffer<RING_SIZE>& ring) {
         return false;
     }
 
+    // Check if the current velocity for x,y,z exceeds the threshold for landing.
+    // If it does, return false.
     if(abs(data.VelX -  ring.getLast().VelX) > velocityThreshold || abs(data.VelY - ring.getLast().VelY) > velocityThreshold || abs(data.VelZ - ring.getLast().VelZ) > velocityThreshold) {
         return false;
     }
@@ -217,4 +238,28 @@ bool landingDetect(const RingBuffer<RING_SIZE>& ring) {
     }
 
     return true;
+}
+
+void SDWriteTimerCallback() {
+    writeToSD = true;
+}
+
+void writePacketToSD(const RingBuffer<RING_SIZE>& ring) {
+    noInterrupts();
+    if(!writeToSD) {
+        return;
+    }
+
+    if (!SDcardPresent) {
+        return;
+    }
+
+    if (loggingFile) {
+        loggingFile.write((const uint8_t*)&ring, sizeof(ring));
+    } else {
+        Serial.println(F("Failed to write to SD card!"));
+    }
+
+    writeToSD = false;
+    interrupts();
 }
