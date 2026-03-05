@@ -116,6 +116,7 @@ void loop() {
             }
         case BURN:
             if (burnoutDetect(ring)) {
+                Serial.println("COAST INITIATED");
                 data.flightState = COAST;
                 burnTime = millis();
                 break;
@@ -125,6 +126,7 @@ void loop() {
             }
         case COAST:
             if (apogeeDetect(ring)) {
+                Serial.println("DESCENT INITIATED");
                 data.flightState = DESCENT;
                 apogeeTime = millis();
                 break;
@@ -134,6 +136,7 @@ void loop() {
             }
         case DESCENT:
             if (landingDetect(ring)) {
+                Serial.println("LANDED");
                 data.flightState = LANDED;
                 landTime = millis();
                 break;
@@ -175,7 +178,7 @@ void loop() {
 }
 
 bool launchDetect(const RingBuffer<RING_SIZE>& ring) {
-    // Save the current sensor requirements for lauch detection
+    // Save the current sensor requirements for launch detection
     const Acceleration accelThreshold = Acceleration::G_3;
     const Acceleration lateralLimit = Acceleration::G_2;
     const uint8_t samplesRequired = 5;
@@ -212,11 +215,56 @@ bool launchDetect(const RingBuffer<RING_SIZE>& ring) {
 }
 
 bool burnoutDetect(const RingBuffer<RING_SIZE>& ring) {
-    return true;
+    const Acceleration burnoutDrop = Acceleration::G_3; // Acceleration threshold to go to coast
+    const uint8_t samplesRequired = 10;
+
+    static uint8_t dropCount = 0;
+
+    float azCurrent = ring.getFirst().AccelZ;
+    float azOldest = ring.getLast().AccelZ;
+
+    float drop = azCurrent - azOldest; // Computation for Acceleration drop
+
+    // If drop is above G_3 AND Current/Newest Acceleration is below G_3 threshold
+    if(drop >= burnoutDrop && azCurrent < burnoutDrop){ 
+        dropCount++;
+    } else {
+        dropCount = 0;
+    }
+    return (dropCount >= samplesRequired); // Burnout confirmation
 }
 
 bool apogeeDetect(const RingBuffer<RING_SIZE>& ring) {
-    return true;
+    static unsigned long apogeeTimerStart = 0;
+
+    // Fetch
+    LSR_Struct current_data = ring.getFirst();
+    LSR_Struct past_data = ring.getLast();
+
+    // Calculate total velocity magnitude 
+    float v_mag = sqrt((current_data.VelX * current_data.VelX) + 
+                       (current_data.VelY * current_data.VelY) + 
+                       (current_data.VelZ * current_data.VelZ));
+
+    // Check falling conditions: 
+    // Velocity is falling
+    // Altitude is decreasing
+    if (current_data.PosZ < past_data.PosZ && v_mag < 0.5f) {
+
+        // Timer if noise induced
+        if (apogeeTimerStart == 0) {
+            apogeeTimerStart = millis();
+        }
+        // Has held continuously for >= 400ms
+        else if (millis() - apogeeTimerStart >= 400) {
+            return true;
+        }
+    } else {
+        // Reset 
+        apogeeTimerStart = 0; 
+    }
+
+    return false;
 }
 
 bool landingDetect(const RingBuffer<RING_SIZE>& ring) {
@@ -278,3 +326,4 @@ void writePacketToSD(const RingBuffer<RING_SIZE>& ring) {
     interrupts();
 
 }
+
