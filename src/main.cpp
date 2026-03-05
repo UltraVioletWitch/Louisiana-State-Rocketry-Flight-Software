@@ -87,18 +87,31 @@ void setup() {
 void loop() {
     switch (data.flightState) {
         case PRE_LAUNCH:
+            static unint32_t lastPrint = 0;
+            const uint32_t printPeriodMs = 100;
+
+            if(millis() - lastPrint >= printPeriodMs) {
+                lastPrint = millis();
+                Serial.print("Lat,Long:");
+                Serial.print(data.PosX, 6);
+                Serial.print(",");
+                Serial.println(data.PosY, 6);
+                Serial.print("Altitude: ");
+                Serial.print(sensors.getAltitudeBMP(), 2);
+                Serial.println("m");
+                Serial.print("Accel: ");
+                Serial.print(data.AccelZ);
+                Serial.println("m/s^2");
+                    
             if (launchDetect(ring)) {
+                Serial.println("BURN INITIATED");
                 data.flightState = BURN;
                 launchTime = millis();
                 /* code to log entire ring goes here */
-
-                if(!SDcardPresent) {
-                    break;
+                if(SDcardPresent) {
+                    writePacketToSD(ring);
                 }
-
-                break;
-            } else {
-                /* Pre-Launch Code goes here */
+                }
                 break;
             }
         case BURN:
@@ -164,21 +177,22 @@ void loop() {
 bool launchDetect(const RingBuffer<RING_SIZE>& ring) {
     // Save the current sensor requirements for lauch detection
     const Acceleration accelThreshold = Acceleration::G_3;
-    const uint8_t samplesRequired = 100;
+    const Acceleration lateralLimit = Acceleration::G_2;
+    const uint8_t samplesRequired = 5;
     const uint8_t altimeterThreshold = 5;
 
-    static uint8_t accelCount;
+    static uint8_t accelCount = 0;
     data = ring.getFirst();
     
     // Get the current data from the Struct
     float currentAccelX = data.AccelX;
     float currentAccelY = data.AccelY;
     float currentAccelZ = data.AccelZ;
-    float currentAltitudeBMP = sensors.getAltitudeBMP() - sensors.getSeaLevelPressure();
+    float currentAltitudeBMP = sensors.getAltitudeBMP();
 
     // Check if the vertical acceleration is above the threshold, 
     // also check if the other axes are not too high to prevent horizontal movement from triggering launch detection.
-    if(currentAccelZ >= accelThreshold && (currentAccelX < accelThreshold || currentAccelY < accelThreshold)) {
+    if(currentAccelZ >= accelThreshold && abs(currentAccelX) < lateralLimit && abs(currentAccelY) < lateralLimit && altAGL > altimeterThreshold) {
         accelCount++;
     } else {
         accelCount = 0;
@@ -262,4 +276,5 @@ void writePacketToSD(const RingBuffer<RING_SIZE>& ring) {
 
     writeToSD = false;
     interrupts();
+
 }
