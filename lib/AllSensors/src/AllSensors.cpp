@@ -60,6 +60,11 @@ const float AllSensors::getAltitudeBMP(void) {
     return altitude_m;
 }
 
+const float AllSensors::getAltitudeBMP(float pressure_hPa) {
+    float altitude_m = 44330.0 * (1.0 - pow(pressure_hPa / bmpSeaLevel_hPa, 0.1903));
+    return altitude_m;
+}
+
 const float AllSensors::getSeaLevelPressure(void) {
     return bmpSeaLevel_hPa;
 }

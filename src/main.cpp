@@ -2,6 +2,7 @@
 #include "LSR_Struct.h"
 #include <RadioLib.h>
 #include <SD.h>
+#include <climits>
 
 // GPS on Serial2, LSM CS=10, BMP CS=9
 AllSensors sensors(Serial2, 9600, 10, 9);
@@ -28,7 +29,7 @@ unsigned long burnTime;
 unsigned long apogeeTime;
 unsigned long landTime;
 IntervalTimer SDTimer;
-const uint32_t SDWriteFreqMicroseconds = 10000;
+const uint32_t SDWriteFreqMicroseconds = 100000;
 
 // SD card 
 File loggingFile;
@@ -42,6 +43,9 @@ const uint8_t radioBusyPin = 31;
 const uint8_t radioDIO1Pin = 30;
 const uint8_t radioDIO2Pin = 27;
 const float EBYTE_FREQ = 912.3;
+
+// BMP390
+uint16_t seaLevelAltitude = 0;
 
 // Initalized variables 
 bool SDcardPresent = false;
@@ -71,6 +75,8 @@ void setup() {
         }
         loggingFile = SD.open("/logs/log.txt", FILE_WRITE | FILE_READ);
     }
+
+    seaLevelAltitude = sensors.getAltitudeBMP();
 
     // Create a timer that will set a flag to write to the SD card at a given frequency
     // I am using this for testing. It's also non-blocking, so it won't interfere with the main loop.
@@ -138,7 +144,7 @@ void loop() {
             }
             
             // Transmit the position of where the rocket landed
-            int16_t landingTransmitStatus = radio.startTransmit((uint8_t*)&data, sizeof(data));
+            int16_t landingTransmitStatus = radio.startTransmit((const uint8_t*)&data, sizeof(data));
             if (landingTransmitStatus != RADIOLIB_ERR_NONE) {
                 Serial.printf("Failed to start transmission, error code: %d\n", landingTransmitStatus);
             }
@@ -168,18 +174,19 @@ bool launchDetect(const RingBuffer<RING_SIZE>& ring) {
     const uint8_t altimeterThreshold = 5;
 
     static uint8_t accelCount;
+    constexpr auto maxAccelCount = std::numeric_limits<decltype(accelCount)>::max(); 
     data = ring.getFirst();
     
     // Get the current data from the Struct
     float currentAccelX = data.AccelX;
     float currentAccelY = data.AccelY;
     float currentAccelZ = data.AccelZ;
-    float currentAltitudeBMP = sensors.getAltitudeBMP() - sensors.getSeaLevelPressure();
+    float currentAltitudeBMP = sensors.getAltitudeBMP() - seaLevelAltitude;
 
     // Check if the vertical acceleration is above the threshold, 
     // also check if the other axes are not too high to prevent horizontal movement from triggering launch detection.
     if(currentAccelZ >= accelThreshold && (currentAccelX < accelThreshold || currentAccelY < accelThreshold)) {
-        accelCount++;
+        accelCount + 1 > maxAccelCount ? accelCount = maxAccelCount : accelCount++;
     } else {
         accelCount = 0;
         return false;
@@ -190,7 +197,7 @@ bool launchDetect(const RingBuffer<RING_SIZE>& ring) {
 
     // Check if we have enough samples from the accelerometer,
     // also check if the altimter is above the height threshold to prevent false positives from the accelerometer.
-    if(accelCount >= samplesRequired && currentAltitudeBMP > altimeterThreshold) {
+    if(accelCount >= samplesRequired && abs(currentAltitudeBMP) > altimeterThreshold) {
         return true;
     }
     
@@ -198,11 +205,74 @@ bool launchDetect(const RingBuffer<RING_SIZE>& ring) {
 }
 
 bool burnoutDetect(const RingBuffer<RING_SIZE>& ring) {
-    return true;
+    // Initalize variables for burnout detection
+    float averageAccelZ = 0;
+    float averageVelZ = 0;
+    float averagePressure = 0;
+    static float prevAverageAccelZ;
+    static float prevAverageVelZ;
+    static float prevAveragePressureToAltitude;
+    bool velocityDecreasing = false;
+    bool altitudeIncreasing = false;
+
+    // Get the values from the current ring buffer and average them
+    for(uint8_t index = 0; index < RING_SIZE; index++) {
+        averageAccelZ += ring[index].AccelZ;
+        averageVelZ += ring[index].VelZ;
+        averagePressure += ring[index].Pressure;
+    }
+    averageAccelZ /= RING_SIZE;
+    averageVelZ /= RING_SIZE;
+    averagePressure /= RING_SIZE;
+    const float averagePressureToAltitude = sensors.getAltitudeBMP(averagePressure);
+
+    // Get the differntials from the previous averages
+    float averageAccelZDifferential = averageAccelZ - prevAverageAccelZ;
+    float averageVelZDifferential = averageVelZ - prevAverageVelZ;
+    float averagePressureAltitudeDifferential = averagePressureToAltitude - prevAveragePressureToAltitude;
+
+    // Update the previous averages for the next burnout detection
+    prevAverageAccelZ = averageAccelZ;
+    prevAverageVelZ = averageVelZ;
+    prevAveragePressureToAltitude = averagePressureToAltitude;
+
+    // Setup the requirements for burnout detection
+    const Acceleration accelThreshold = Acceleration::G_9;
+    const uint8_t samplesRequired = 100;
+    static uint8_t accelCount;
+    constexpr auto maxAccelCount = std::numeric_limits<decltype(accelCount)>::max();
+
+    // Check if the average vertical acceleration is below the launch G-forces
+    if(averageAccelZ < accelThreshold) {
+        accelCount + 1 > maxAccelCount ? accelCount = maxAccelCount : accelCount++;
+    } else {
+        accelCount = 0;
+        return false;
+    }
+
+    // Check if the velocity is decreasing
+    if(averageVelZDifferential <= 0) {   
+        velocityDecreasing = true;
+    } else {
+        velocityDecreasing = false;
+    }
+
+    // Check if the altitude is increasing
+    if(averagePressureAltitudeDifferential >= 0) {
+        altitudeIncreasing = true;
+    } else {
+        altitudeIncreasing = false;
+    }
+
+    if((accelCount >= samplesRequired) && velocityDecreasing && altitudeIncreasing) {
+        return true;
+    }
+
+    return false;
 }
 
 bool apogeeDetect(const RingBuffer<RING_SIZE>& ring) {
-    return true;
+    return false;
 }
 
 bool landingDetect(const RingBuffer<RING_SIZE>& ring) {
@@ -247,10 +317,12 @@ void SDWriteTimerCallback() {
 void writePacketToSD(const RingBuffer<RING_SIZE>& ring) {
     noInterrupts();
     if(!writeToSD) {
+        interrupts();
         return;
     }
 
     if (!SDcardPresent) {
+        interrupts();
         return;
     }
 

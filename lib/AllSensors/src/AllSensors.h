@@ -24,6 +24,7 @@ public:
 
     // Get the altitude from the BMP
     const float getAltitudeBMP(void);
+    const float getAltitudeBMP(float pressure_hPa);
 
     // Get the sea-level pressure from the BMP
     const float getSeaLevelPressure(void); 
