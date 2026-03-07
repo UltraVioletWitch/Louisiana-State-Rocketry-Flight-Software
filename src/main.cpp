@@ -92,7 +92,7 @@ void setup() {
 
 void loop() {
     switch (data.flightState) {
-        case PRE_LAUNCH:
+        case PRE_LAUNCH: {
             if (launchDetect(ring)) {
                 data.flightState = BURN;
                 launchTime = millis();
@@ -107,7 +107,8 @@ void loop() {
                 /* Pre-Launch Code goes here */
                 break;
             }
-        case BURN:
+        }
+        case BURN: {
             if (burnoutDetect(ring)) {
                 data.flightState = COAST;
                 burnTime = millis();
@@ -116,7 +117,8 @@ void loop() {
                 /* Burn code here */
                 break;
             }
-        case COAST:
+        }
+        case COAST: {
             if (apogeeDetect(ring)) {
                 data.flightState = DESCENT;
                 apogeeTime = millis();
@@ -125,7 +127,8 @@ void loop() {
                 /* Coast code here */
                 break;
             }
-        case DESCENT:
+        }
+        case DESCENT: {
             if (landingDetect(ring)) {
                 data.flightState = LANDED;
                 landTime = millis();
@@ -134,7 +137,8 @@ void loop() {
                 /* Descent code here */
                 break;
             }
-        case LANDED:
+        }
+        case LANDED: {
             
             // Close the SD card, it is no longer needed and having it open risk corruption
             if(SDcardPresent) {
@@ -149,9 +153,11 @@ void loop() {
                 Serial.printf("Failed to start transmission, error code: %d\n", landingTransmitStatus);
             }
             break;
-        default:
+        }
+        default: {
             delay(100);
             break;
+        }
     }
 
     /* Kalman Filter and Sensor Reading Code */
@@ -168,36 +174,52 @@ void loop() {
 }
 
 bool launchDetect(const RingBuffer<RING_SIZE>& ring) {
+    // Initialize variables for launch detection
+    float averageAccelZ = 0;
+    float averagePressure = 0;
+    static float prevAverageAccelZ;
+    static float prevAveragePressureToAltitude;
+    bool altitudeIncreasing = false;
+
+    // Get the values from the current ring buffer and average them
+    for(uint8_t index = 0; index < RING_SIZE; index++) {
+        averageAccelZ += ring[index].AccelZ;
+        averagePressure += ring[index].Pressure;
+    }
+    averageAccelZ /= RING_SIZE;
+    averagePressure /= RING_SIZE;
+    const float averagePressureToAltitude = sensors.getAltitudeBMP(averagePressure);
+
+    // Get the differntials from the previous averages
+    float averageAccelZDifferential = averageAccelZ - prevAverageAccelZ;
+    float averagePressureAltitudeDifferential = averagePressureToAltitude - prevAveragePressureToAltitude;
+
+    // Update the previous averages for the next burnout detection
+    prevAverageAccelZ = averageAccelZ;
+    prevAveragePressureToAltitude = averagePressureToAltitude;
+
     // Save the current sensor requirements for lauch detection
-    const Acceleration accelThreshold = Acceleration::G_3;
+    const Acceleration accelThreshold = Acceleration::G_9;
     const uint8_t samplesRequired = 100;
-    const uint8_t altimeterThreshold = 5;
-
+    const uint32_t altimeterThreshold = 5;
     static uint8_t accelCount;
-    constexpr auto maxAccelCount = std::numeric_limits<decltype(accelCount)>::max(); 
-    data = ring.getFirst();
-    
-    // Get the current data from the Struct
-    float currentAccelX = data.AccelX;
-    float currentAccelY = data.AccelY;
-    float currentAccelZ = data.AccelZ;
-    float currentAltitudeBMP = sensors.getAltitudeBMP() - seaLevelAltitude;
+    constexpr auto maxAccelCount = std::numeric_limits<decltype(accelCount)>::max();
 
-    // Check if the vertical acceleration is above the threshold, 
-    // also check if the other axes are not too high to prevent horizontal movement from triggering launch detection.
-    if(currentAccelZ >= accelThreshold && (currentAccelX < accelThreshold || currentAccelY < accelThreshold)) {
+    if(averageAccelZ < accelThreshold) {
         accelCount + 1 > maxAccelCount ? accelCount = maxAccelCount : accelCount++;
     } else {
         accelCount = 0;
         return false;
     }
-    
-    // TODO: Add a check for so that the angles from the acelerometer is no greater than 45 degrees.
-    // The rocket will launch fairly verically
 
-    // Check if we have enough samples from the accelerometer,
-    // also check if the altimter is above the height threshold to prevent false positives from the accelerometer.
-    if(accelCount >= samplesRequired && abs(currentAltitudeBMP) > altimeterThreshold) {
+    // Check if the altitude is increasing
+    if(averagePressureAltitudeDifferential >= altimeterThreshold) {
+        altitudeIncreasing = true;
+    } else {
+        altitudeIncreasing = false;
+    }
+
+    if((accelCount >= samplesRequired) && altitudeIncreasing) {
         return true;
     }
     
@@ -238,6 +260,7 @@ bool burnoutDetect(const RingBuffer<RING_SIZE>& ring) {
 
     // Setup the requirements for burnout detection
     const Acceleration accelThreshold = Acceleration::G_9;
+    const uint32_t altimeterThreshold = 5;
     const uint8_t samplesRequired = 100;
     static uint8_t accelCount;
     constexpr auto maxAccelCount = std::numeric_limits<decltype(accelCount)>::max();
@@ -258,7 +281,7 @@ bool burnoutDetect(const RingBuffer<RING_SIZE>& ring) {
     }
 
     // Check if the altitude is increasing
-    if(averagePressureAltitudeDifferential >= 0) {
+    if(averagePressureAltitudeDifferential >= altimeterThreshold) {
         altitudeIncreasing = true;
     } else {
         altitudeIncreasing = false;
@@ -272,6 +295,47 @@ bool burnoutDetect(const RingBuffer<RING_SIZE>& ring) {
 }
 
 bool apogeeDetect(const RingBuffer<RING_SIZE>& ring) {
+    // Initalize variables for apogee detection
+    float averageVelZ = 0;
+    float averagePressure = 0;
+    static float prevAverageVelZ;
+    static float prevAveragePressureToAltitude;
+    static float lowestVelocity;
+    static float highestAltitude;
+
+    // Get the values from the current ring buffer and average them
+    for(uint8_t index = 0; index < RING_SIZE; index++) {
+        averageVelZ += ring[index].VelZ;
+        averagePressure += ring[index].Pressure;
+    }
+    averageVelZ /= RING_SIZE;
+    averagePressure /= RING_SIZE;
+    const float averagePressureToAltitude = sensors.getAltitudeBMP(averagePressure);
+
+    // Get the differentials from the previous averages
+    float averageVelZDifferential = averageVelZ - prevAverageVelZ;
+    float averagePressureAltitudeDifferential = averagePressureToAltitude - prevAveragePressureToAltitude;
+
+    // Update the previous averages for the next apogee detection
+    prevAverageVelZ = averageVelZ;
+    prevAveragePressureToAltitude = averagePressureToAltitude;
+
+    const uint32_t altimeterThreshold = 5;
+    const uint8_t velocityThreshold = 5;
+    const uint8_t samplesRequired = 10;
+    static uint8_t passedSamples;
+    constexpr auto maxSampleCount = std::numeric_limits<decltype(passedSamples)>::max();
+
+    if((averageVelZDifferential >= velocityThreshold) && (averagePressureAltitudeDifferential <= altimeterThreshold)) {
+        passedSamples + 1 > maxSampleCount ? passedSamples = maxSampleCount : passedSamples++;
+    } else {
+        passedSamples = 0;
+    }
+
+    if(passedSamples >= samplesRequired) {
+        return true;
+    }
+
     return false;
 }
 
