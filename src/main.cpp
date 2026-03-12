@@ -33,7 +33,7 @@ const uint32_t SDWriteFreqMicroseconds = 100000;
 
 // SD card 
 File loggingFile;
-void writePacketToSD(const RingBuffer<RING_SIZE>& ring);
+void writePacketToSD(const LSR_Struct& data);
 void SDWriteTimerCallback();
 
 // radio setup
@@ -58,6 +58,8 @@ void setup() {
         Serial.println(F("One or more sensors failed to initialize!"));
     }
 
+    SPI.begin();
+
     /* Setup code here */
     int16_t radioState = radio.begin(EBYTE_FREQ);
     if(radioState != RADIOLIB_ERR_NONE) {
@@ -73,7 +75,17 @@ void setup() {
         if (!SD.exists("/logs")) {
             SD.mkdir("/logs");
         }
-        loggingFile = SD.open("/logs/log.txt", FILE_WRITE | FILE_READ);
+
+        if(SD.exists("/logs/log.csv")) {
+            uint16_t fileNumber = 1;
+            while(SD.exists(("/logs/log" + String(fileNumber) + ".csv").c_str())) {
+                fileNumber++;
+            }
+            loggingFile = SD.open(("/logs/log" + String(fileNumber) + ".csv").c_str(), FILE_WRITE | FILE_READ);
+        } else {
+            loggingFile = SD.open("/logs/log.csv", FILE_WRITE | FILE_READ);
+        }
+        loggingFile.println("TimeStamp,AccelX,AccelY,AccelZ,GyroX,GyroY,GyroZ,VelX,VelY,VelZ,PosX,PosY,PosZ,Theta,Phi,Psi,Pressure,FlightState");
     }
 
     seaLevelAltitude = sensors.getAltitudeBMP();
@@ -97,14 +109,49 @@ void loop() {
                 data.flightState = BURN;
                 launchTime = millis();
                 /* code to log entire ring goes here */
-
                 if(!SDcardPresent) {
                     break;
                 }
 
+                if (!loggingFile) {
+                    break;
+                }
+
+                LSR_Struct loggingData;
+
+                // Log the entire ring buffer to the SD card.
+                // Floats might cause issues, example they might increase write time and/or only print as integers. This is something that can be expected.
+                for(size_t i = 0; i < RING_SIZE; i++) {
+                    loggingData = ring[i];
+                    loggingFile.printf("%lu,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%d\n", 
+                        millis(), 
+                        loggingData.AccelX, 
+                        loggingData.AccelY, 
+                        loggingData.AccelZ, 
+                        loggingData.GyroX, 
+                        loggingData.GyroY, 
+                        loggingData.GyroZ, 
+                        loggingData.VelX, 
+                        loggingData.VelY, 
+                        loggingData.VelZ, 
+                        loggingData.PosX, 
+                        loggingData.PosY, 
+                        loggingData.PosZ, 
+                        loggingData.Theta, 
+                        loggingData.Phi, 
+                        loggingData.Psi, 
+                        loggingData.Pressure, 
+                        loggingData.flightState
+                    );
+                }
+
+                // Increase the writing frequency to the SD card during flight
+                SDTimer.update(SDWriteFreqMicroseconds / 10.0);
+
                 break;
             } else {
                 /* Pre-Launch Code goes here */
+                writePacketToSD(ring.getFirst());
                 break;
             }
         }
@@ -115,6 +162,7 @@ void loop() {
                 break;
             } else {
                 /* Burn code here */
+                writePacketToSD(ring.getFirst());
                 break;
             }
         }
@@ -125,6 +173,7 @@ void loop() {
                 break;
             } else {
                 /* Coast code here */
+                writePacketToSD(ring.getFirst());
                 break;
             }
         }
@@ -135,6 +184,7 @@ void loop() {
                 break;
             } else {
                 /* Descent code here */
+                writePacketToSD(ring.getFirst());
                 break;
             }
         }
@@ -148,6 +198,10 @@ void loop() {
             }
             
             // Transmit the position of where the rocket landed
+            if(!radioPresent) {
+                break;
+            }
+
             int16_t landingTransmitStatus = radio.startTransmit((const uint8_t*)&data, sizeof(data));
             if (landingTransmitStatus != RADIOLIB_ERR_NONE) {
                 Serial.printf("Failed to start transmission, error code: %d\n", landingTransmitStatus);
@@ -378,7 +432,7 @@ void SDWriteTimerCallback() {
     writeToSD = true;
 }
 
-void writePacketToSD(const RingBuffer<RING_SIZE>& ring) {
+void writePacketToSD(const LSR_Struct& data) {
     noInterrupts();
     if(!writeToSD) {
         interrupts();
@@ -391,7 +445,26 @@ void writePacketToSD(const RingBuffer<RING_SIZE>& ring) {
     }
 
     if (loggingFile) {
-        loggingFile.write((const uint8_t*)&ring, sizeof(ring));
+        loggingFile.printf("%lu,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%d\n", 
+            millis(), 
+            data.AccelX, 
+            data.AccelY, 
+            data.AccelZ, 
+            data.GyroX, 
+            data.GyroY, 
+            data.GyroZ, 
+            data.VelX, 
+            data.VelY, 
+            data.VelZ, 
+            data.PosX, 
+            data.PosY, 
+            data.PosZ, 
+            data.Theta, 
+            data.Phi, 
+            data.Psi, 
+            data.Pressure, 
+            data.flightState
+        );
     } else {
         Serial.println(F("Failed to write to SD card!"));
     }
