@@ -6,12 +6,10 @@
 class PID {
     public:
         // Constructors
-        PID(double kp, double ki, double kd);
-        PID(double kp, double ki, double kd, double dt);
         PID(double kp, double ki, double kd, double dt, double min_output, double max_output);
 
         // Methods
-        double calculate(double setpoint, double measured_value);
+        double calculate(double setpoint, double measured_value, double dt, bool filterDerivative);
 
         // Setters
         void reset();
@@ -27,6 +25,7 @@ class PID {
         double getMaxOutput() const;
         double getIntegral() const;
         double getDerivative() const; // This derivative term can cause issues if the PID is used in a loop with a very small dt
+        double getPreviousDerivative() const;
         double getPreviousError() const;
         double getPreviousTime() const;
 
@@ -39,6 +38,7 @@ class PID {
         double _max_output;
         double _integral;
         double _derivative;
+        double _previous_derivative;
         double _previous_error;
         double _previous_time;
 };
