@@ -5,6 +5,8 @@
 #include <RadioLib.h>
 #include <SD.h>
 
+#define __TEST__ 1
+
 // GPS on Serial2, LSM CS=10, BMP CS=9
 AllSensors sensors(Serial2, 9600, 10, 9);
 unsigned long accelAltTimer, GPSTimer;
@@ -29,13 +31,13 @@ unsigned long launchTime;
 unsigned long burnTime;
 unsigned long apogeeTime;
 unsigned long landTime;
-IntervalTimer SDTimer;
-const uint32_t SDWriteFreqMicroseconds = 100000;
 
 // SD card 
 File loggingFile;
 void writePacketToSD(const LSR_Struct& data);
 void SDWriteTimerCallback();
+IntervalTimer SDTimer;
+const uint32_t SDWriteFreqMicroseconds = 100000;
 
 // radio setup
 SX1262 radio = new Module(SCK, MISO, MOSI, 7);
@@ -45,8 +47,8 @@ const uint8_t radioDIO1Pin = 30;
 const uint8_t radioDIO2Pin = 27;
 const float EBYTE_FREQ = 912.3;
 
-// BMP390
-uint16_t seaLevelAltitude = 0;
+// Servo Pins
+constexpr uint8_t ServoPins[4] = {33, 36, 37, 14};
 
 // Initalized variables 
 bool SDcardPresent = false;
@@ -89,8 +91,6 @@ void setup() {
         loggingFile.println("TimeStamp,AccelX,AccelY,AccelZ,GyroX,GyroY,GyroZ,VelX,VelY,VelZ,PosX,PosY,PosZ,Theta,Phi,Psi,Pressure,FlightState");
     }
 
-    seaLevelAltitude = sensors.getAltitudeBMP();
-
     // Create a timer that will set a flag to write to the SD card at a given frequency
     // I am using this for testing. It's also non-blocking, so it won't interfere with the main loop.
     if(SDTimer.begin(SDWriteTimerCallback, SDWriteFreqMicroseconds)) {
@@ -99,11 +99,34 @@ void setup() {
         Serial.println(F("Failed to initialize SD write timer."));
     }
 
+    // Initalize the Servo Pins
+    for (auto &&ServoNumber : ServoPins) {
+        pinMode(ServoNumber, OUTPUT);
+    }
+
     accelAltTimer = millis();
     GPSTimer = millis();
 }
 
-void loop() {
+void loop() { 
+    
+    #if __TEST__ // Set of commands that can allow us to make state changes to test the program at will
+        if(Serial.available()) {
+            String serialTestCommand = Serial.readString();
+            if(serialTestCommand.equalsIgnoreCase("PRELAUNCH")) {
+                data.flightState = PRE_LAUNCH;
+            } else if(serialTestCommand.equalsIgnoreCase("BURN")) {
+                data.flightState = BURN;
+            } else if(serialTestCommand.equalsIgnoreCase("COAST")) {
+                data.flightState = COAST;
+            } else if(serialTestCommand.equalsIgnoreCase("LANDED")) {
+                data.flightState = LANDED;
+            } else {
+                Serial.printf(F("Invalid Serial Command\n"));
+            } 
+        }
+    #endif
+
     switch (data.flightState) {
         case PRE_LAUNCH: {
             if (launchDetect(ring)) {
@@ -117,7 +140,7 @@ void loop() {
                 if (!loggingFile) {
                     break;
                 }
-
+                
                 LSR_Struct loggingData;
 
                 // Log the entire ring buffer to the SD card.
@@ -199,13 +222,11 @@ void loop() {
             }
             
             // Transmit the position of where the rocket landed
-            if(!radioPresent) {
-                break;
-            }
-
-            int16_t landingTransmitStatus = radio.startTransmit((const uint8_t*)&data, sizeof(data));
-            if (landingTransmitStatus != RADIOLIB_ERR_NONE) {
-                Serial.printf("Failed to start transmission, error code: %d\n", landingTransmitStatus);
+            if(radioPresent) {
+                int16_t landingTransmitStatus = radio.startTransmit((const uint8_t*)&data, sizeof(data));
+                if (landingTransmitStatus != RADIOLIB_ERR_NONE) {
+                    Serial.printf("Failed to start transmission, error code: %d\n", landingTransmitStatus);
+                }
             }
             break;
         }
