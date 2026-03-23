@@ -5,7 +5,7 @@
 #include <RadioLib.h>
 #include <SD.h>
 
-#define __TEST__ 1
+#define __TEST__ 0
 
 // GPS on Serial2, LSM CS=10, BMP CS=9
 AllSensors sensors(Serial2, 9600, 24, 0);
@@ -15,6 +15,7 @@ const float GPSHz = 10;
 
 // data structure
 LSR_Struct data;
+State currentFlightState = PRE_LAUNCH;
 
 // ring buffer
 const int RING_SIZE = 8;
@@ -46,7 +47,7 @@ const uint8_t radioBusyPin = 31;
 const uint8_t radioDIO1Pin = 30;
 const uint8_t radioDIO2Pin = 27;
 const float EBYTE_FREQ = 912.3;
-// SX1262 radio = new Module(radioCSPin, radioDIO1Pin, radioResetPin, radioBusyPin);
+SX1262 radio = new Module(radioCSPin, radioDIO1Pin, radioResetPin, radioBusyPin);
 
 // Servo Pins
 constexpr uint8_t ServoPins[4] = {33, 36, 37, 14};
@@ -83,6 +84,11 @@ void setup() {
         Serial.printf(F("Failed to initialize SD card!\n"));
     } else {
         SDcardPresent = true;
+
+        if(!SDTimer.begin(SDWriteTimerCallback, SDWriteFreqMicroseconds)) {
+            Serial.printf(F("SD Timer Failed\n"));
+        }
+
         if (!SD.exists("/logs")) {
             SD.mkdir("/logs");
         }
@@ -105,14 +111,6 @@ void setup() {
         loggingFile.flush();
     }
 
-    // Create a timer that will set a flag to write to the SD card at a given frequency
-    // I am using this for testing. It's also non-blocking, so it won't interfere with the main loop.
-    if(SDTimer.begin(SDWriteTimerCallback, SDWriteFreqMicroseconds)) {
-        Serial.println(F("SD write timer initialized successfully."));
-    } else {
-        Serial.println(F("Failed to initialize SD write timer."));
-    }
-
     // Initalize the Servo Pins
     for (auto &&ServoNumber : ServoPins) {
         pinMode(ServoNumber, OUTPUT);
@@ -120,8 +118,6 @@ void setup() {
 
     accelAltTimer = millis();
     GPSTimer = millis();
-
-    Serial.printf(F("Entering the loop function\n\n"));
 }
 
 uint32_t loops;
@@ -133,16 +129,16 @@ void loop() {
             String serialTestCommand = Serial.readString();
             if(serialTestCommand.equalsIgnoreCase("PRELAUNCH")) {
                 Serial.printf(F("--PRELAUNCH--\n\n"));
-                data.flightState = PRE_LAUNCH;
+                currentFlightState = PRE_LAUNCH;
             } else if(serialTestCommand.equalsIgnoreCase("BURN")) {
                 Serial.printf(F("--BURN--\n\n"));
-                data.flightState = BURN;
+                currentFlightState = BURN;
             } else if(serialTestCommand.equalsIgnoreCase("COAST")) {
                 Serial.printf(F("--COAST--\n\n"));
-                data.flightState = COAST;
+                currentFlightState = COAST;
             } else if(serialTestCommand.equalsIgnoreCase("LANDED")) {
                 Serial.printf(F("--LANDED--\n\n"));
-                data.flightState = LANDED;
+                currentFlightState = LANDED;
             } else if(serialTestCommand.equalsIgnoreCase("FLUSH")) {
                 loggingFile.flush();
             } else {
@@ -154,11 +150,13 @@ void loop() {
     sensors.updateNoKalmanFilter(data);
     ring.push(data);
 
-    switch (data.flightState) {
+    switch (currentFlightState) {
         case PRE_LAUNCH: {
             if (launchDetect(ring)) {
-                data.flightState = BURN;
+                Serial.printf(F("--Burn--"));
+                currentFlightState = BURN;
                 launchTime = millis();
+                loggingFile.flush();
                 /* code to log entire ring goes here */
                 if(!SDcardPresent) {
                     break;
@@ -171,7 +169,6 @@ void loop() {
                 LSR_Struct preLaunchLoggingFile;
 
                 // Log the entire ring buffer to the SD card.
-                // Floats might cause issues, example they might increase write time and/or only print as integers. This is something that can be expected.
                 for(size_t i = 0; i < RING_SIZE; i++) {
                     preLaunchLoggingFile = ring[i];
                     loggingFile.printf("%lu,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%d\n", 
@@ -208,8 +205,10 @@ void loop() {
         }
         case BURN: {
             if (burnoutDetect(ring)) {
-                data.flightState = COAST;
+                Serial.printf(F("--Burnout--"));
+                currentFlightState = COAST;
                 burnTime = millis();
+                loggingFile.flush();
                 break;
             } else {
                 /* Burn code here */
@@ -219,8 +218,10 @@ void loop() {
         }
         case COAST: {
             if (apogeeDetect(ring)) {
-                data.flightState = DESCENT;
+                Serial.printf(F("--Descent--"));
+                currentFlightState = DESCENT;
                 apogeeTime = millis();
+                loggingFile.flush();
                 break;
             } else {
                 /* Coast code here */
@@ -230,8 +231,10 @@ void loop() {
         }
         case DESCENT: {
             if (landingDetect(ring)) {
-                data.flightState = LANDED;
+                Serial.printf(F("--Landed--"));
+                currentFlightState = LANDED;
                 landTime = millis();
+                loggingFile.flush();
                 break;
             } else {
                 /* Descent code here */
@@ -302,13 +305,21 @@ bool launchDetect(const RingBuffer<RING_SIZE>& ring) {
     prevAveragePressureToAltitude = averagePressureToAltitude;
 
     // Save the current sensor requirements for lauch detection
-    const Acceleration accelThreshold = Acceleration::G_9;
-    const uint8_t samplesRequired = 100;
-    const uint32_t altimeterThreshold = 5;
+    #if __TEST__
+        const uint8_t accelThreshold = 12;
+        const uint8_t samplesRequired = 50;
+        const uint32_t altimeterThreshold = 0;
+
+    #else
+        const Acceleration accelThreshold = Acceleration::G_9;
+        const uint8_t samplesRequired = 100;
+        const uint32_t altimeterThreshold = 5;
+    #endif
+    
     static uint8_t accelCount;
     constexpr auto maxAccelCount = std::numeric_limits<decltype(accelCount)>::max();
 
-    if(averageAccelZ < accelThreshold) {
+    if(averageAccelZ > accelThreshold) {
         accelCount + 1 > maxAccelCount ? accelCount = maxAccelCount : accelCount++;
     } else {
         accelCount = 0;
@@ -362,15 +373,22 @@ bool burnoutDetect(const RingBuffer<RING_SIZE>& ring) {
     prevAveragePressureToAltitude = averagePressureToAltitude;
 
     // Setup the requirements for burnout detection
-    const Acceleration accelThreshold = Acceleration::G_9;
-    const uint32_t altimeterThreshold = 5;
-    const uint8_t samplesRequired = 100;
+    #if __TEST__
+        const uint8_t accelThreshold = 10;
+        const uint32_t altimeterThreshold = 0;
+        const uint8_t samplesRequired = 50;
+    #else
+        const Acceleration accelThreshold = Acceleration::G_9;
+        const uint32_t altimeterThreshold = 5;
+        const uint8_t samplesRequired = 100;
+    #endif
     static uint8_t accelCount;
     constexpr auto maxAccelCount = std::numeric_limits<decltype(accelCount)>::max();
 
     // Check if the average vertical acceleration is below the launch G-forces
     if(averageAccelZ < accelThreshold) {
         accelCount + 1 > maxAccelCount ? accelCount = maxAccelCount : accelCount++;
+        printf("BA: %d", accelCount);
     } else {
         accelCount = 0;
         return false;
@@ -423,9 +441,16 @@ bool apogeeDetect(const RingBuffer<RING_SIZE>& ring) {
     prevAverageVelZ = averageVelZ;
     prevAveragePressureToAltitude = averagePressureToAltitude;
 
-    const uint32_t altimeterThreshold = 5;
-    const uint8_t velocityThreshold = 5;
-    const uint8_t samplesRequired = 10;
+    // Setup the requirements for burnout detection
+    #if __TEST__
+        const uint32_t altimeterThreshold = 1;
+        const uint8_t velocityThreshold = 0;
+        const uint8_t samplesRequired = 50;
+    #else
+        const uint32_t altimeterThreshold = 5;
+        const uint8_t velocityThreshold = 5;
+        const uint8_t samplesRequired = 10;
+    #endif
     static uint8_t passedSamples;
     constexpr auto maxSampleCount = std::numeric_limits<decltype(passedSamples)>::max();
 
@@ -443,6 +468,7 @@ bool apogeeDetect(const RingBuffer<RING_SIZE>& ring) {
 }
 
 bool landingDetect(const RingBuffer<RING_SIZE>& ring) {
+    return false;
     const Acceleration accelThreshold = Acceleration::G_1;
     const float velocityThreshold = 1.0;
     const float positionThreshold = 3.0;
@@ -494,7 +520,7 @@ void writePacketToSD(const LSR_Struct& data) {
     }
 
     if (loggingFile) {
-        loggingFile.printf("%lu,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n", 
+        loggingFile.printf("%lu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n", 
             millis(), 
             data.AccelX, 
             data.AccelY, 
@@ -514,6 +540,27 @@ void writePacketToSD(const LSR_Struct& data) {
             data.Pressure, 
             data.flightState
         );
+
+        // Serial.printf("%lu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n", 
+        //     millis(), 
+        //     data.AccelX, 
+        //     data.AccelY, 
+        //     data.AccelZ, 
+        //     data.GyroX, 
+        //     data.GyroY, 
+        //     data.GyroZ, 
+        //     data.VelX, 
+        //     data.VelY, 
+        //     data.VelZ, 
+        //     data.PosX, 
+        //     data.PosY, 
+        //     data.PosZ, 
+        //     data.Theta, 
+        //     data.Phi, 
+        //     data.Psi, 
+        //     data.Pressure, 
+        //     data.flightState
+        // );
     } else {
         Serial.println(F("Failed to write to SD card!"));
     }
