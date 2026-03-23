@@ -17,7 +17,15 @@ bool AllSensors::begin() {
     if (!lsm.begin_SPI(lsmCS)) {
         Serial.println(F("Failed to find LSM6DSO32 on SPI!"));
         success = false;
-    } else Serial.println(F("LSM6DSO32 OK"));
+    } else {
+        Serial.println(F("LSM6DSO32 OK"));
+        
+        lsm.setAccelRange(LSM6DSO32_ACCEL_RANGE_32_G);
+        lsm.setAccelDataRate(LSM6DS_RATE_104_HZ);
+
+        lsm.setGyroRange(LSM6DS_GYRO_RANGE_125_DPS);
+        lsm.setGyroDataRate(LSM6DS_RATE_104_HZ);
+    }
 
     // BMP390 SPI
     if (!bmp.begin_SPI(bmpCS)) {
@@ -72,53 +80,113 @@ const float AllSensors::getSeaLevelPressure(void) {
 // Update all sensors
 void AllSensors::update() {
     // --- GPS Update ---
-    while (gpsSerial.available() > 0) {
-        gps.encode(gpsSerial.read());
-    }
+    // while (gpsSerial.available() > 0) {
+    //     gps.encode(gpsSerial.read());
+    // }
 
     // --- IMU Update ---
+    Serial.printf(F("Getting IMU Data\n"));
     sensors_event_t accel, gyro, temp;
-    lsm.getEvent(&accel, &gyro, &temp);
+    if(lsm.getEvent(&accel, &gyro, &temp)) {
+        Serial.println("IMU DATA");
+        Serial.printf("x: %d,\t\ty: %d,\t\tz: %d\nx: %d,\t\ty: %d,\t\tz: %d\nTemp: %d", 
+            accel.acceleration.x, 
+            accel.acceleration.y, 
+            accel.acceleration.z, 
+            gyro.gyro.x, 
+            gyro.gyro.y, 
+            gyro.gyro.z, 
+            temp.temperature
+        );
+    }
 
     // --- BMP Update ---
+    Serial.printf(F("Getting BMP Data\n"));
     bmp.performReading();
 
     // --- Print all sensor data every 1 second ---
-    if (millis() - lastPrint > 1000) {
-        lastPrint = millis();
-        Serial.println(F("\n==== Sensor Readings ===="));
+    // if (millis() - lastPrint > 1000) {
+    //     lastPrint = millis();
+    //     Serial.println(F("\n==== Sensor Readings ===="));
 
-        // GPS
-        Serial.print(F("GPS Fix: "));
-        Serial.println(gps.location.isValid() ? "Yes" : "No");
-        Serial.print(F("Latitude: "));
-        Serial.println(gps.location.isValid() ? String(gps.location.lat(), 6) : "Invalid");
-        Serial.print(F("Longitude: "));
-        Serial.println(gps.location.isValid() ? String(gps.location.lng(), 6) : "Invalid");
-        Serial.print(F("Altitude [m]: "));
-        Serial.println(gps.altitude.isValid() ? String(gps.altitude.meters()) : "Invalid");
-        Serial.print(F("Satellites: "));
-        Serial.println(gps.satellites.isValid() ? String(gps.satellites.value()) : "Invalid");
+    //     // GPS
+    //     Serial.print(F("GPS Fix: "));
+    //     Serial.println(gps.location.isValid() ? "Yes" : "No");
+    //     Serial.print(F("Latitude: "));
+    //     Serial.println(gps.location.isValid() ? String(gps.location.lat(), 6) : "Invalid");
+    //     Serial.print(F("Longitude: "));
+    //     Serial.println(gps.location.isValid() ? String(gps.location.lng(), 6) : "Invalid");
+    //     Serial.print(F("Altitude [m]: "));
+    //     Serial.println(gps.altitude.isValid() ? String(gps.altitude.meters()) : "Invalid");
+    //     Serial.print(F("Satellites: "));
+    //     Serial.println(gps.satellites.isValid() ? String(gps.satellites.value()) : "Invalid");
 
-        // LSM6DSO32 IMU
-        Serial.print(F("Accel [m/s^2] X: ")); Serial.print(accel.acceleration.x);
-        Serial.print(F(" Y: ")); Serial.print(accel.acceleration.y);
-        Serial.print(F(" Z: ")); Serial.println(accel.acceleration.z);
+    //     // LSM6DSO32 IMU
+    //     Serial.print(F("Accel [m/s^2] X: ")); Serial.print(accel.acceleration.x);
+    //     Serial.print(F(" Y: ")); Serial.print(accel.acceleration.y);
+    //     Serial.print(F(" Z: ")); Serial.println(accel.acceleration.z);
 
-        Serial.print(F("Gyro [rad/s] X: ")); Serial.print(gyro.gyro.x);
-        Serial.print(F(" Y: ")); Serial.print(gyro.gyro.y);
-        Serial.print(F(" Z: ")); Serial.println(gyro.gyro.z);
+    //     Serial.print(F("Gyro [rad/s] X: ")); Serial.print(gyro.gyro.x);
+    //     Serial.print(F(" Y: ")); Serial.print(gyro.gyro.y);
+    //     Serial.print(F(" Z: ")); Serial.println(gyro.gyro.z);
 
-        // BMP390
-        Serial.print(F("Pressure [Pa]: ")); Serial.println(bmp.pressure);
-        Serial.print(F("Temperature [C]: ")); Serial.println(bmp.temperature);
+    //     // BMP390
+    //     Serial.print(F("Pressure [Pa]: ")); Serial.println(bmp.pressure);
+    //     Serial.print(F("Temperature [C]: ")); Serial.println(bmp.temperature);
 
-        // Altitude calculation using calibrated sea-level pressure
-        float bmpPressure_hPa = bmp.pressure / 100.0;
-        float altitude_m = 44330.0 * (1.0 - pow(bmpPressure_hPa / bmpSeaLevel_hPa, 0.1903));
-        Serial.print(F("Altitude [m]: ")); Serial.println(altitude_m);
+    //     // Altitude calculation using calibrated sea-level pressure
+    //     float bmpPressure_hPa = bmp.pressure / 100.0;
+    //     float altitude_m = 44330.0 * (1.0 - pow(bmpPressure_hPa / bmpSeaLevel_hPa, 0.1903));
+    //     Serial.print(F("Altitude [m]: ")); Serial.println(altitude_m);
 
-        Serial.println(F("========================="));
-    }
+    //     Serial.println(F("========================="));
+    // }
 }
 
+void AllSensors::updateNoKalmanFilter(LSR_Struct& packet) {
+    sensors_event_t accel, gyro, temp;
+    lsm.getEvent(&accel, &gyro, &temp);
+
+    bmp.performReading();
+
+    while(gpsSerial.available()) {
+        gps.encode(gpsSerial.read());
+    }
+
+    packet = {
+        millis(),
+        accel.acceleration.x,
+        accel.acceleration.y,
+        accel.acceleration.z,
+        gyro.gyro.x,
+        gyro.gyro.y,
+        gyro.gyro.z,
+        0, 0, 0,
+        float(gps.location.lat()),
+        float(gps.location.lng()),
+        float(gps.altitude.meters()),
+        0, 0, 0,
+        float(bmp.pressure / 100),
+        float(temp.temperature),
+    };
+
+    // Serial.printf("%lu,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n", 
+    //     millis(), 
+    //     packet.AccelX, 
+    //     packet.AccelY, 
+    //     packet.AccelZ, 
+    //     packet.GyroX, 
+    //     packet.GyroY, 
+    //     packet.GyroZ, 
+    //     packet.VelX, 
+    //     packet.VelY, 
+    //     packet.VelZ, 
+    //     packet.PosX, 
+    //     packet.PosY, 
+    //     packet.PosZ, 
+    //     packet.Theta, 
+    //     packet.Phi, 
+    //     packet.Psi, 
+    //     packet.Pressure
+    // );
+}

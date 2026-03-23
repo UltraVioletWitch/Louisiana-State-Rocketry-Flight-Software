@@ -11,13 +11,14 @@
 class AllSensors {
 public:
     // Constructor: GPS UART, baud, LSM CS, BMP CS
-    AllSensors(HardwareSerial &gpsSerial, uint32_t gpsBaud = 9600, int lsmCS = 10, int bmpCS = 9);
+    AllSensors(HardwareSerial &gpsSerial, uint32_t gpsBaud = 9600, int lsmCS = 24, int bmpCS = 0);
 
     // Initialize all sensors
     bool begin();
 
     // Call repeatedly in loop
     void update();
+    void updateNoKalmanFilter(LSR_Struct&);
 
     // Manually set BMP sea-level pressure
     void calibrateBMPSeaLevel(void);
