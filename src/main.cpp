@@ -156,7 +156,6 @@ void loop() {
                 Serial.printf(F("--Burn--"));
                 currentFlightState = BURN;
                 launchTime = millis();
-                loggingFile.flush();
                 /* code to log entire ring goes here */
                 if(!SDcardPresent) {
                     break;
@@ -189,9 +188,11 @@ void loop() {
                         preLaunchLoggingFile.Phi, 
                         preLaunchLoggingFile.Psi, 
                         preLaunchLoggingFile.Pressure, 
-                        preLaunchLoggingFile.flightState
+                        currentFlightState
                     );
                 }
+
+                loggingFile.flush();
 
                 // Increase the writing frequency to the SD card during flight
                 SDTimer.update(SDWriteFreqMicroseconds / 10.0);
@@ -313,7 +314,7 @@ bool launchDetect(const RingBuffer<RING_SIZE>& ring) {
     #else
         const Acceleration accelThreshold = Acceleration::G_9;
         const uint8_t samplesRequired = 100;
-        const uint32_t altimeterThreshold = 5;
+        const uint32_t altimeterThreshold = 2;
     #endif
     
     static uint8_t accelCount;
@@ -379,7 +380,7 @@ bool burnoutDetect(const RingBuffer<RING_SIZE>& ring) {
         const uint8_t samplesRequired = 50;
     #else
         const Acceleration accelThreshold = Acceleration::G_9;
-        const uint32_t altimeterThreshold = 5;
+        const uint32_t altimeterThreshold = 2;
         const uint8_t samplesRequired = 100;
     #endif
     static uint8_t accelCount;
@@ -448,8 +449,8 @@ bool apogeeDetect(const RingBuffer<RING_SIZE>& ring) {
         const uint8_t samplesRequired = 50;
     #else
         const uint32_t altimeterThreshold = 5;
-        const uint8_t velocityThreshold = 5;
-        const uint8_t samplesRequired = 10;
+        const uint8_t velocityThreshold = 2;
+        const uint8_t samplesRequired = 100;
     #endif
     static uint8_t passedSamples;
     constexpr auto maxSampleCount = std::numeric_limits<decltype(passedSamples)>::max();
@@ -538,7 +539,7 @@ void writePacketToSD(const LSR_Struct& data) {
             data.Phi, 
             data.Psi, 
             data.Pressure, 
-            data.flightState
+            currentFlightState
         );
 
         // Serial.printf("%lu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n", 

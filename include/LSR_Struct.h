@@ -61,7 +61,6 @@ typedef struct LSR_Struct {
   float Theta, Phi, Psi;
   float Pressure;
   float Temp;
-  State flightState = PRE_LAUNCH;
   RollState rollControlState = OFF;
 } E22_Packet;
 
