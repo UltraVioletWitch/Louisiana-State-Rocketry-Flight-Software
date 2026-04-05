@@ -3,15 +3,19 @@
 #include "LSR_Struct.h"
 // #include "PID.h"
 #include <RadioLib.h>
-#include <SD.h>
+#include <sdFat.h>
+#include <RingBuf.h>
 
-#define __TEST__ 0
+#define __TEST__ 1
 
-// GPS on Serial2, LSM CS=10, BMP CS=9
+// GPS on Serial2, LSM CS=24, BMP CS=0
 AllSensors sensors(Serial2, 9600, 24, 0);
+static const SPISettings spiSettings(1000000UL, MSBFIRST, SPI_MODE0); // What the default adafruit sensors use for SPI settings
 unsigned long accelAltTimer, GPSTimer;
 const float accelAltHz = 100;
 const float GPSHz = 10;
+void changeIMUInterruptPin1(void);
+void changeIMUInterruptPin2(void);
 
 // data structure
 LSR_Struct data;
@@ -34,20 +38,24 @@ unsigned long apogeeTime;
 unsigned long landTime;
 
 // SD card 
-File loggingFile;
+SdFs sdCard;
+FsFile sdFile;
+RingBuf<FsFile, 2 << 9> sdBuffer;
 void writePacketToSD(const LSR_Struct& data);
 void SDWriteTimerCallback();
 IntervalTimer SDTimer;
 const uint32_t SDWriteFreqMicroseconds = 100000;
+elapsedMillis SDWriteElapsedTime;
 
 // radio setup
+// There is a conflict with some of the other libraries with the SPI interface
 const uint8_t radioCSPin = 7;
 const uint8_t radioResetPin = 32;
 const uint8_t radioBusyPin = 31;
 const uint8_t radioDIO1Pin = 30;
 const uint8_t radioDIO2Pin = 27;
 const float EBYTE_FREQ = 912.3;
-SX1262 radio = new Module(radioCSPin, radioDIO1Pin, radioResetPin, radioBusyPin);
+SX1262 radio = new Module(radioCSPin, radioDIO1Pin, radioResetPin, radioBusyPin, SPI, spiSettings);
 
 // Servo Pins
 constexpr uint8_t ServoPins[4] = {33, 36, 37, 14};
@@ -69,7 +77,9 @@ void setup() {
         Serial.println(F("One or more sensors failed to initialize!"));
     }
 
-    // SPI.begin();
+    // Use the IMU interrupts to trigger sensor readings
+    attachInterrupt(digitalPinToInterrupt(sensors.getLSM6DSO32IntPin1()), changeIMUInterruptPin1, FALLING);
+    attachInterrupt(digitalPinToInterrupt(sensors.getLSM6DSO32IntPin2()), changeIMUInterruptPin2, FALLING);
 
     /* Setup code here */
     // int16_t radioState = radio.begin(EBYTE_FREQ);
@@ -80,8 +90,8 @@ void setup() {
     //     Serial.printf(F("EByte Initalized\n"));
     // }
 
-    if(!SD.begin(BUILTIN_SDCARD)) {
-        Serial.printf(F("Failed to initialize SD card!\n"));
+    if(!sdCard.begin(SdioConfig(FIFO_SDIO))) {
+        sdCard.initErrorPrint(&Serial);
     } else {
         SDcardPresent = true;
 
@@ -89,42 +99,53 @@ void setup() {
             Serial.printf(F("SD Timer Failed\n"));
         }
 
-        if (!SD.exists("/logs")) {
-            SD.mkdir("/logs");
+        if (!sdCard.exists("/logs")) {
+            sdCard.mkdir("/logs");
         }
 
-        if(SD.exists("/logs/log.csv")) {
+        if(sdCard.exists("/logs/log.csv")) {
             uint16_t fileNumber = 1;
-            while(SD.exists(("/logs/log" + String(fileNumber) + ".csv").c_str())) {
+            while(sdCard.exists(("/logs/log" + String(fileNumber) + ".csv").c_str())) {
                 fileNumber++;
             }
-            loggingFile = SD.open(("/logs/log" + String(fileNumber) + ".csv").c_str(), FILE_WRITE | FILE_READ);
-            Serial.printf("Created logging file: %s\n", ("/logs/log" + String(fileNumber) + ".csv").c_str());
+            SDcardPresent = sdFile.open(("/logs/log" + String(fileNumber) + ".csv").c_str(), O_RDWR | O_CREAT | O_TRUNC);
         } else {
-            loggingFile = SD.open("/logs/log.csv", FILE_WRITE | FILE_READ);
+            SDcardPresent = sdFile.open("/logs/log.csv", O_RDWR | O_CREAT | O_TRUNC);
         }
 
-        while(!loggingFile) {
+        if(!SDcardPresent) {
+            Serial.printf(F("Failed to open file on SD card\n"));
+        }
+
+        while(!sdFile) {
             delayMicroseconds(2000);
         }
-        loggingFile.println("TimeStamp,AccelX,AccelY,AccelZ,GyroX,GyroY,GyroZ,VelX,VelY,VelZ,PosX,PosY,PosZ,Theta,Phi,Psi,Pressure,FlightState");
-        loggingFile.flush();
+
+        if(!sdFile.preAllocate(10 * 1024 * 1024)) { // Pre-allocate 10MB for better write speeds
+            Serial.printf(F("Failed to pre-allocate SD card\n"));
+        }
+        sdFile.println("TimeStamp,AccelX,AccelY,AccelZ,GyroX,GyroY,GyroZ,VelX,VelY,VelZ,PosX,PosY,PosZ,Theta,Phi,Psi,Pressure,FlightState");
+        sdFile.flush();
+        sdBuffer.begin(&sdFile);
     }
+
+    // Make the analog resolution 16 bits for better servo control
+    analogWriteRes(16);
 
     // Initalize the Servo Pins
     for (auto &&ServoNumber : ServoPins) {
         pinMode(ServoNumber, OUTPUT);
+        analogWrite(ServoNumber, UINT16_MAX >> 2);
     }
 
     accelAltTimer = millis();
     GPSTimer = millis();
 }
 
-uint32_t loops;
-
 void loop() { 
-    
-    #if __TEST__ // Set of commands that can allow us to make state changes to test the program at will
+    // Set of commands that can allow us to make state changes to test the program at will
+    // TODO: Add some commands to manipulate the servo positions, Zero/Reset sensors
+    #if __TEST__ 
         if(Serial.available()) {
             String serialTestCommand = Serial.readString();
             if(serialTestCommand.equalsIgnoreCase("PRELAUNCH")) {
@@ -140,7 +161,7 @@ void loop() {
                 Serial.printf(F("--LANDED--\n\n"));
                 currentFlightState = LANDED;
             } else if(serialTestCommand.equalsIgnoreCase("FLUSH")) {
-                loggingFile.flush();
+                sdFile.flush();
             } else {
                 Serial.printf(F("Invalid Serial Command\n"));
             } 
@@ -149,6 +170,7 @@ void loop() {
 
     sensors.updateNoKalmanFilter(data);
     ring.push(data);
+
 
     switch (currentFlightState) {
         case PRE_LAUNCH: {
@@ -161,7 +183,7 @@ void loop() {
                     break;
                 }
 
-                if (!loggingFile) {
+                if (!sdFile) {
                     break;
                 }
                 
@@ -170,7 +192,7 @@ void loop() {
                 // Log the entire ring buffer to the SD card.
                 for(size_t i = 0; i < RING_SIZE; i++) {
                     preLaunchLoggingFile = ring[i];
-                    loggingFile.printf("%lu,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%d\n", 
+                    sdFile.printf("%lu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%d\n", 
                         millis(), 
                         preLaunchLoggingFile.AccelX, 
                         preLaunchLoggingFile.AccelY, 
@@ -192,7 +214,7 @@ void loop() {
                     );
                 }
 
-                loggingFile.flush();
+                sdFile.flush();
 
                 // Increase the writing frequency to the SD card during flight
                 SDTimer.update(SDWriteFreqMicroseconds / 10.0);
@@ -209,7 +231,7 @@ void loop() {
                 Serial.printf(F("--Burnout--"));
                 currentFlightState = COAST;
                 burnTime = millis();
-                loggingFile.flush();
+                sdFile.flush();
                 break;
             } else {
                 /* Burn code here */
@@ -222,7 +244,7 @@ void loop() {
                 Serial.printf(F("--Descent--"));
                 currentFlightState = DESCENT;
                 apogeeTime = millis();
-                loggingFile.flush();
+                sdFile.flush();
                 break;
             } else {
                 /* Coast code here */
@@ -235,7 +257,7 @@ void loop() {
                 Serial.printf(F("--Landed--"));
                 currentFlightState = LANDED;
                 landTime = millis();
-                loggingFile.flush();
+                sdFile.flush();
                 break;
             } else {
                 /* Descent code here */
@@ -247,8 +269,8 @@ void loop() {
             
             // Close the SD card, it is no longer needed and having it open risk corruption
             if(SDcardPresent) {
-                loggingFile.flush();
-                loggingFile.close();
+                sdFile.flush();
+                sdFile.close();
                 SDcardPresent = false;
             }
             
@@ -389,7 +411,6 @@ bool burnoutDetect(const RingBuffer<RING_SIZE>& ring) {
     // Check if the average vertical acceleration is below the launch G-forces
     if(averageAccelZ < accelThreshold) {
         accelCount + 1 > maxAccelCount ? accelCount = maxAccelCount : accelCount++;
-        printf("BA: %d", accelCount);
     } else {
         accelCount = 0;
         return false;
@@ -469,7 +490,6 @@ bool apogeeDetect(const RingBuffer<RING_SIZE>& ring) {
 }
 
 bool landingDetect(const RingBuffer<RING_SIZE>& ring) {
-    return false;
     const Acceleration accelThreshold = Acceleration::G_1;
     const float velocityThreshold = 1.0;
     const float positionThreshold = 3.0;
@@ -510,6 +530,10 @@ void SDWriteTimerCallback() {
 
 void writePacketToSD(const LSR_Struct& data) {
     noInterrupts();
+
+    // Flush the SD card every 2.5 seconds to prevent data loss
+    const uint16_t SDFlushInterval = 2500; 
+
     if(!writeToSD) {
         interrupts();
         return;
@@ -520,8 +544,14 @@ void writePacketToSD(const LSR_Struct& data) {
         return;
     }
 
-    if (loggingFile) {
-        loggingFile.printf("%lu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n", 
+    if(sdFile.isBusy()) {
+        interrupts();
+        return;
+    }
+
+    if (sdFile) {
+
+        sdBuffer.printf("%lu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%d\n", 
             millis(), 
             data.AccelX, 
             data.AccelY, 
@@ -542,30 +572,23 @@ void writePacketToSD(const LSR_Struct& data) {
             currentFlightState
         );
 
-        // Serial.printf("%lu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n", 
-        //     millis(), 
-        //     data.AccelX, 
-        //     data.AccelY, 
-        //     data.AccelZ, 
-        //     data.GyroX, 
-        //     data.GyroY, 
-        //     data.GyroZ, 
-        //     data.VelX, 
-        //     data.VelY, 
-        //     data.VelZ, 
-        //     data.PosX, 
-        //     data.PosY, 
-        //     data.PosZ, 
-        //     data.Theta, 
-        //     data.Phi, 
-        //     data.Psi, 
-        //     data.Pressure, 
-        //     data.flightState
-        // );
+        if(SDWriteElapsedTime > SDFlushInterval || sdBuffer.bytesFree() < 512) {
+            sdBuffer.sync();
+            sdFile.flush();
+            SDWriteElapsedTime = 0;
+        }
     } else {
         Serial.println(F("Failed to write to SD card!"));
     }
 
     writeToSD = false;
     interrupts();
+}
+
+void changeIMUInterruptPin1(void) {
+    sensors.dataReadyLSMInt1();
+}
+
+void changeIMUInterruptPin2(void) {
+    sensors.dataReadyLSMInt2();
 }

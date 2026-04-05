@@ -8,7 +8,6 @@ AllSensors::AllSensors(HardwareSerial &serial, uint32_t baud, int lsmCSPin, int 
 // Initialize sensors
 bool AllSensors::begin() {
     bool success = true;
-
     // GPS
     gpsSerial.begin(gpsBaud);
     Serial.println(F("=== GPS Initialized ==="));
@@ -25,6 +24,10 @@ bool AllSensors::begin() {
 
         lsm.setGyroRange(LSM6DS_GYRO_RANGE_125_DPS);
         lsm.setGyroDataRate(LSM6DS_RATE_104_HZ);
+
+        lsm.configIntOutputs(true, false);
+        lsm.configInt1(false, true, false);
+        lsm.configInt2(false, false, true);
     }
 
     // BMP390 SPI
@@ -86,7 +89,6 @@ void AllSensors::update() {
 
     // --- IMU Update ---
     Serial.printf(F("Getting IMU Data\n"));
-    sensors_event_t accel, gyro, temp;
     if(lsm.getEvent(&accel, &gyro, &temp)) {
         Serial.println("IMU DATA");
         Serial.printf("x: %d,\t\ty: %d,\t\tz: %d\nx: %d,\t\ty: %d,\t\tz: %d\nTemp: %d", 
@@ -144,7 +146,23 @@ void AllSensors::update() {
 }
 
 void AllSensors::updateNoKalmanFilter(LSR_Struct& packet) {
-    sensors_event_t accel, gyro, temp;
+    // Adafruit_LSM6DS_Accelerometer accelSensor(&lsm);
+    // Adafruit_LSM6DS_Gyro gyroSensor(&lsm);
+    // Adafruit_LSM6DS_Temp tempSensor(&lsm);
+
+    // if(lsmDataReadyInt1) {
+    //     lsmDataReadyInt1 = false;
+    //     accelSensor.getEvent(&accel);
+    //     tempSensor.getEvent(&temp);
+    //     Serial.printf(F("Accel Data Ready Interrupt Triggered\n"));
+    // }
+
+    // if(lsmDataReadyInt2) {
+    //     lsmDataReadyInt2 = false;
+    //     gyroSensor.getEvent(&gyro);
+    //     tempSensor.getEvent(&temp);
+    // }
+
     lsm.getEvent(&accel, &gyro, &temp);
 
     bmp.performReading();
@@ -164,29 +182,25 @@ void AllSensors::updateNoKalmanFilter(LSR_Struct& packet) {
         0, 0, 0,
         float(gps.location.lat()),
         float(gps.location.lng()),
-        float(gps.altitude.meters()),
+        bmp.readAltitude(bmpSeaLevel_hPa),
         0, 0, 0,
         float(bmp.pressure / 100),
         float(temp.temperature),
     };
+}
 
-    // Serial.printf("%lu,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n", 
-    //     millis(), 
-    //     packet.AccelX, 
-    //     packet.AccelY, 
-    //     packet.AccelZ, 
-    //     packet.GyroX, 
-    //     packet.GyroY, 
-    //     packet.GyroZ, 
-    //     packet.VelX, 
-    //     packet.VelY, 
-    //     packet.VelZ, 
-    //     packet.PosX, 
-    //     packet.PosY, 
-    //     packet.PosZ, 
-    //     packet.Theta, 
-    //     packet.Phi, 
-    //     packet.Psi, 
-    //     packet.Pressure
-    // );
+void AllSensors::dataReadyLSMInt1(void) {
+    lsmDataReadyInt1 = true;
+}
+
+void AllSensors::dataReadyLSMInt2(void) {
+    lsmDataReadyInt2 = true;
+}
+
+const uint8_t AllSensors::getLSM6DSO32IntPin1(void) {
+    return lsmInterruptPin1;
+}
+
+const uint8_t AllSensors::getLSM6DSO32IntPin2(void) {
+    return lsmInterruptPin2;
 }

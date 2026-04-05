@@ -20,6 +20,16 @@ public:
     void update();
     void updateNoKalmanFilter(LSR_Struct&);
 
+    // Accelermeter Interrupt handlers
+    void dataReadyLSMInt1(void);
+    void dataReadyLSMInt2(void);
+    const uint8_t getLSM6DSO32IntPin1(void);
+    const uint8_t getLSM6DSO32IntPin2(void);
+
+    // BMP Interrupt handler
+    void dataReadyBMPInt(void);
+    uint8_t getBMP390IntPin(void);
+
     // Manually set BMP sea-level pressure
     void calibrateBMPSeaLevel(void);
 
@@ -31,6 +41,7 @@ public:
     const float getSeaLevelPressure(void); 
 
 private:
+    const int myConst = 42;
     // GPS
     HardwareSerial &gpsSerial;
     uint32_t gpsBaud;
@@ -39,10 +50,15 @@ private:
     // IMU
     Adafruit_LSM6DSO32 lsm;
     int lsmCS;
+    sensors_event_t accel, gyro, temp;
+    const uint8_t lsmInterruptPin1 = 25, lsmInterruptPin2 = 26;
+    volatile bool lsmDataReadyInt1; // gyro drdy
+    volatile bool lsmDataReadyInt2; // accel drdy
 
     // BMP390
     Adafruit_BMP3XX bmp;
     int bmpCS;
+    volatile bool bmpDataReady;
     float bmpSeaLevel_hPa;
 
     double lastPrint = 0;
