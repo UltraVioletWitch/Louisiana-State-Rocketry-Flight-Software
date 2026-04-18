@@ -1,161 +1,78 @@
 #include "PID.h"
 
-PID::PID(double kp = 1.0, 
-    double ki = 0.0, 
-    double kd = 0.1, 
-    double dt = 0.1, 
-    double min_output = __DBL_MIN__, 
-    double max_output = __DBL_MAX__)
-    : _kp(kp), 
-    _ki(ki), 
-    _kd(kd), 
-    _dt(dt), 
-    _min_output(min_output), 
-    _max_output(max_output), 
-    _integral(0.0), 
-    _derivative(0.0), 
-    _previous_error(0.0), 
-    _previous_time(0.0) {
-        // dt being zero is a big no
-        if(_dt <= 0) {
-            _dt = 0.1;
-        }
+LSR_RollController::LSR_RollController() {
+    resetController();
+}
 
-        if(_kp <= 0 ) {
-            _kp = 1.0;
-        }
+void LSR_RollController::resetController() {
+    innerLoop.reset();
+    outerLoop.reset();
+    thetaFilter.clear();
+    gyroFilter.clear();
+}
 
-        if(_ki < 0) {
-            _ki = 0.0;
-        }
+/*
+     Line Logic: Intelligent Clamping Anti-Windup
+     Only accumulates integral if the output isn't already saturated
+*/
+float LSR_PID_Core::compute(float target, float current, float kp, float ki, float kd, float dt, float limit) {
+    // Safety check for dt very unlikly
+    if (dt < MIN_DT) 
+        return 0.0; 
 
-        if(_kd < 0) {
-            _kd = 0.1;
-        }
+    float error = target - current;
+    //Proportional term
+    float P = kp * error;
+    // Derivative on Measurement 
+    // Formula: D = -Kd * (d_current / dt)
+    float D = -kd * (current - prevMeasurement) / dt;
+    prevError = error;
+    prevMeasurement = current;
 
-        if(_min_output >= _max_output) {
-            _min_output = __DBL_MIN__;
-            _max_output = __DBL_MAX__;
-        }
+    // Only integrate if not saturated
+    float potentialOutput = P + (ki * (integral + error * dt)) + D;
+    if (abs(potentialOutput) < limit) {
+        integral += error * dt;
     }
 
-double PID::calculate(double setpoint = 0, double measured_value = 0, double dt_s = 0.1, bool filterDerivative = false) {
-    unsigned int timeNow = micros();
+    float I = ki * integral;
+    return constrain(P + I + D, -limit, limit);
+}
 
-    // No dividing by zero or negative time intervals
-    if(dt_s > 0) {
-        _dt = dt_s;
+float LSR_RollController::update(E22_Packet &packet, float targetRoll, bool isReturning, float dt) {
+    thetaFilter.add(packet.Theta);
+    gyroFilter.add(packet.GyroX);
+
+    float smoothTheta = thetaFilter.getAvg();
+    float smoothGyro = gyroFilter.getAvg();
+
+    //  TARGET RAMPING LOGIC 
+    // Calculate how much we can move setpoint to avoid PID kick
+    float maxChange = RAMP_RATE * dt;
+    float setpointDiff = targetRoll - currentSetpoint;
+
+    // Move currentSetpoint toward targetRoll by no more than maxChange
+    if (abs(setpointDiff) <= maxChange) {
+        currentSetpoint = targetRoll;
     } else {
-        _dt = (timeNow - (unsigned long)_previous_time) / 1e6;
+        currentSetpoint += (setpointDiff > 0 ? maxChange : -maxChange);
     }
 
-    // If dt is still zero or negative, set it to a default value
-    if(_dt <= 0) {
-        _dt = 0.1;
-    }
-
-    double error = setpoint - measured_value;
-
-    _integral += error * _dt;
-    if(_ki != 0) {
-        double _integrand_min = _min_output / _ki;
-        double _integrand_max = _max_output / _ki;
-        _integral = std::clamp(_integral, _integrand_min, _integrand_max); // or constrain
-    }
-    
-    if(filterDerivative) {
-        double raw_derivative = (error - _previous_error) / _dt;
-        constexpr double alpha = 0.75; // not a good solution to make this a constantexpr
-        _derivative = alpha * _previous_derivative + (1 - alpha) * raw_derivative;
-        _previous_derivative = raw_derivative;
+    // Select Gain Set
+    float kpo, kio, kdo, kpi, kii, kdi;
+    if (!isReturning) {
+        kpo = Kp_INIT_OUTER; kio = Ki_INIT_OUTER; kdo = Kd_INIT_OUTER;
+        kpi = Kp_INIT_INNER; kii = Ki_INIT_INNER; kdi = Kd_INIT_INNER;
     } else {
-        _derivative = (error - _previous_error) / _dt;
-        _previous_derivative = _derivative;
-    }
-    
-    _previous_error = error;
-    _previous_time = timeNow;
-
-    double output = _kp * error + _ki * _integral + _kd * _derivative;
-
-    return std::clamp(output, _min_output, _max_output); // or constrain
-}
-
-void PID::reset() {
-    _integral = 0.0;
-    _previous_error = 0.0;
-}
-
-void PID::setTunedParameters(double kp, double ki, double kd) {
-    if(kp <= 0) {
-        Serial.printf(F("Invalid Kp value. It must be greater than 0."));
-        return;
+        kpo = Kp_RET_OUTER; kio = Ki_RET_OUTER; kdo = Kd_RET_OUTER;
+        kpi = Kp_RET_INNER; kii = Ki_RET_INNER; kdi = Kd_RET_INNER;
     }
 
-    if(ki < 0) {
-        Serial.printf(F("Invalid Ki value. It must be greater than or equal to 0."));
-        return;
-    }
+    // Outer Loop: Angle -> Target Rate (Uses the RAMPED setpoint)
+    float targetRate = outerLoop.compute(currentSetpoint, smoothTheta, kpo, kio, kdo, dt, MAX_ROLL_RATE);
 
-    if(kd < 0) {
-        Serial.printf(F("Invalid Kd value. It must be greater than or equal to 0."));
-        return;
-    }
+    // Inner Loop: Rate -> Fin Angle
+    float finAngle = innerLoop.compute(targetRate, smoothGyro, kpi, kii, kdi, dt, MAX_FIN_ANGLE);
 
-    _kp = kp;
-    _ki = ki;
-    _kd = kd;
-}
-
-void PID::setPIDOutputLimits(double min_output, double max_output) {
-    if(min_output >= max_output) {
-        return;
-    }
-
-    _min_output = min_output;
-    _max_output = max_output;
-}
-
-double PID::getKp() const {
-    return _kp;
-}
-
-double PID::getKi() const {
-    return _ki;
-}
-
-double PID::getKd() const {
-    return _kd;
-}
-
-double PID::getDt() const {
-    return _dt;
-}
-
-double PID::getMinOutput() const {
-    return _min_output;
-}
-
-double PID::getMaxOutput() const {
-    return _max_output;
-}
-
-double PID::getIntegral() const {
-    return _integral;
-}
-
-double PID::getDerivative() const {
-    return _derivative;
-}
-
-double PID::getPreviousDerivative() const {
-    return _previous_derivative;
-}
-
-double PID::getPreviousError() const {
-    return _previous_error;
-}
-
-double PID::getPreviousTime() const {
-    return _previous_time;
+    return finAngle;
 }

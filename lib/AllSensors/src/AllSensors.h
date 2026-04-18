@@ -40,8 +40,10 @@ public:
     // Get the sea-level pressure from the BMP
     const float getSeaLevelPressure(void); 
 
+    volatile bool lsmDataReadyInt1; // gyro drdy
+    volatile bool lsmDataReadyInt2; // accel drdy
+
 private:
-    const int myConst = 42;
     // GPS
     HardwareSerial &gpsSerial;
     uint32_t gpsBaud;
@@ -52,8 +54,6 @@ private:
     int lsmCS;
     sensors_event_t accel, gyro, temp;
     const uint8_t lsmInterruptPin1 = 25, lsmInterruptPin2 = 26;
-    volatile bool lsmDataReadyInt1; // gyro drdy
-    volatile bool lsmDataReadyInt2; // accel drdy
 
     // BMP390
     Adafruit_BMP3XX bmp;
@@ -61,6 +61,8 @@ private:
     volatile bool bmpDataReady;
     float bmpSeaLevel_hPa;
 
+    // GPS
+    double rocketLatitude, rocketLongitude, rocketSpeed;
     double lastPrint = 0;
 };
 

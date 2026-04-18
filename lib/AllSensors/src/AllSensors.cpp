@@ -48,9 +48,13 @@ bool AllSensors::begin() {
 
 // Manually calibrate BMP sea-level pressure
 void AllSensors::calibrateBMPSeaLevel(void) {
+    elapsedMillis timeBetweenPressureReadings;
+    
     for (int i = 0; i < 10; i++) {
-        bmp.performReading();
-        delay(100);
+        if(timeBetweenPressureReadings > 100) {
+            bmp.performReading();
+            timeBetweenPressureReadings = 0;
+        }
     }
 
     float sumPressure = 0;
@@ -171,6 +175,15 @@ void AllSensors::updateNoKalmanFilter(LSR_Struct& packet) {
         gps.encode(gpsSerial.read());
     }
 
+    if(gps.location.isValid()) {
+        rocketLatitude = gps.location.lat();
+        rocketLongitude = gps.location.lng();
+    }
+
+    if(gps.speed.isValid()) {
+        rocketSpeed = gps.speed.mps();
+    }
+
     packet = {
         millis(),
         accel.acceleration.x,
@@ -179,9 +192,9 @@ void AllSensors::updateNoKalmanFilter(LSR_Struct& packet) {
         gyro.gyro.x,
         gyro.gyro.y,
         gyro.gyro.z,
-        0, 0, 0,
-        float(gps.location.lat()),
-        float(gps.location.lng()),
+        0, 0, float(rocketSpeed),
+        float(rocketLatitude),
+        float(rocketLongitude),
         bmp.readAltitude(bmpSeaLevel_hPa),
         0, 0, 0,
         float(bmp.pressure / 100),

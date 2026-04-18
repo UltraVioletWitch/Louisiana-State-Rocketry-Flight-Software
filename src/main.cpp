@@ -1,9 +1,11 @@
 #include "AllSensors.h"
 #include <climits>
 #include "LSR_Struct.h"
-// #include "PID.h"
+#include "PID.h"
 #include <RadioLib.h>
-#include <sdFat.h>
+#include <Servo.h>
+#include <SPI.h>
+#include <SdFat.h>
 #include <RingBuf.h>
 
 #define __TEST__ 1
@@ -58,7 +60,15 @@ const float EBYTE_FREQ = 912.3;
 SX1262 radio = new Module(radioCSPin, radioDIO1Pin, radioResetPin, radioBusyPin, SPI, spiSettings);
 
 // Servo Pins
-constexpr uint8_t ServoPins[4] = {33, 36, 37, 14};
+LSR_RollController rollCtrl;
+constexpr uint8_t numberOfServos = 4;
+const uint8_t ServoPins[numberOfServos] = {33, 36, 37, 14};
+const uint16_t servoBitResolution = 12;
+Servo servos[4]; // Change the servo library frequency from 20,000 to 4,000
+const uint16_t minPulse = 1100;
+const uint16_t maxPulse = 1900; 
+const uint16_t neutralPulse = 1500; 
+
 
 // Initalized variables 
 bool SDcardPresent = false;
@@ -128,18 +138,22 @@ void setup() {
         sdFile.flush();
         sdBuffer.begin(&sdFile);
     }
-
-    // Make the analog resolution 16 bits for better servo control
-    analogWriteRes(16);
-
-    // Initalize the Servo Pins
-    for (auto &&ServoNumber : ServoPins) {
-        pinMode(ServoNumber, OUTPUT);
-        analogWrite(ServoNumber, UINT16_MAX >> 2);
-    }
+    
+    // Initalize the Servo Pins && PWM 
+    analogWriteRes(servoBitResolution); // Set resolution of the analogwrite function
+    
+    for (uint8_t pin = 0; pin < numberOfServos; pin++) {
+        pinMode(pin, OUTPUT);
+        servos[pin].attach(ServoPins[pin]);
+        servos[pin].writeMicroseconds(neutralPulse);
+    } 
 
     accelAltTimer = millis();
     GPSTimer = millis();
+
+    // DO NOT DELETE!!!!!!!!!!
+    sensors.updateNoKalmanFilter(data);
+    ring.push(data);
 }
 
 void loop() { 
@@ -162,132 +176,199 @@ void loop() {
                 currentFlightState = LANDED;
             } else if(serialTestCommand.equalsIgnoreCase("FLUSH")) {
                 sdFile.flush();
-            } else {
+            } else if(serialTestCommand.equalsIgnoreCase("ZEROSERVOS")) {
+                for(uint8_t pins : ServoPins) {
+                    servos[pins].writeMicroseconds(neutralPulse);
+                }
+            } else if(serialTestCommand.equalsIgnoreCase("SWEEPSERVOS")) {
+                uint8_t count = 0;
+                uint16_t angle = neutralPulse; 
+                uint16_t increament = 4;
+                while(count < 4) {
+
+                    angle += increament;
+                    if(angle > maxPulse || angle <= minPulse) {
+                        increament = -increament;
+                        count++;
+                    }
+
+                    for(uint8_t pins = 0; pins < numberOfServos; pins++) {
+                        servos[pins].writeMicroseconds(angle);
+                    }
+                    delay(5);
+                }
+
+                for(uint8_t pins = 0; pins < numberOfServos; pins++) {
+                    servos[pins].writeMicroseconds(neutralPulse);
+                }
+            }
+            else {
                 Serial.printf(F("Invalid Serial Command\n"));
             } 
         }
     #endif
 
-    sensors.updateNoKalmanFilter(data);
-    ring.push(data);
+    if (sensors.lsmDataReadyInt1 || sensors.lsmDataReadyInt2) { 
+        noInterrupts();
+        sensors.lsmDataReadyInt1 = false;
+        sensors.lsmDataReadyInt2 = false;
+
+        // Calculate dt using microsecond precision
+        static uint32_t lastMicros = 0;
+        uint32_t currentMicros = micros();
+        if (lastMicros == 0) lastMicros = currentMicros;
+        float current_dt = (float)(currentMicros - lastMicros) / 1000000.0f;
+        lastMicros = currentMicros;
+
+        // READ SENSORS ONCE
+        sensors.updateNoKalmanFilter(data);
+        ring.push(data);
 
 
-    switch (currentFlightState) {
-        case PRE_LAUNCH: {
-            if (launchDetect(ring)) {
-                Serial.printf(F("--Burn--"));
-                currentFlightState = BURN;
-                launchTime = millis();
-                /* code to log entire ring goes here */
-                if(!SDcardPresent) {
+        switch (currentFlightState) {
+            case PRE_LAUNCH: {
+                if (launchDetect(ring)) {
+                    Serial.printf(F("--Burn--"));
+                    currentFlightState = BURN;
+                    launchTime = millis();
+                    /* code to log entire ring goes here */
+                    if(!SDcardPresent) {
+                        break;
+                    }
+
+                    if (!sdFile) {
+                        break;
+                    }
+                    
+                    LSR_Struct preLaunchLoggingFile;
+
+                    // Log the entire ring buffer to the SD card.
+                    for(size_t i = 0; i < RING_SIZE; i++) {
+                        preLaunchLoggingFile = ring[i];
+                        sdFile.printf("%lu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%d\n", 
+                            millis(), 
+                            preLaunchLoggingFile.AccelX, 
+                            preLaunchLoggingFile.AccelY, 
+                            preLaunchLoggingFile.AccelZ, 
+                            preLaunchLoggingFile.GyroX, 
+                            preLaunchLoggingFile.GyroY, 
+                            preLaunchLoggingFile.GyroZ, 
+                            preLaunchLoggingFile.VelX, 
+                            preLaunchLoggingFile.VelY, 
+                            preLaunchLoggingFile.VelZ, 
+                            preLaunchLoggingFile.PosX, 
+                            preLaunchLoggingFile.PosY, 
+                            preLaunchLoggingFile.PosZ, 
+                            preLaunchLoggingFile.Theta, 
+                            preLaunchLoggingFile.Phi, 
+                            preLaunchLoggingFile.Psi, 
+                            preLaunchLoggingFile.Pressure, 
+                            currentFlightState
+                        );
+                    }
+
+                    sdFile.flush();
+
+                    // Increase the writing frequency to the SD card during flight
+                    SDTimer.update(SDWriteFreqMicroseconds / 10.0);
+
+                    break;
+                } else {
+                    /* Pre-Launch Code goes here */
+                    writePacketToSD(ring.getFirst());
                     break;
                 }
-
-                if (!sdFile) {
+            }
+            case BURN: {
+                if (burnoutDetect(ring)) {
+                    Serial.printf(F("--Burnout--"));
+                    currentFlightState = COAST;
+                    burnTime = millis();
+                    sdFile.flush();
                     break;
+                } else {
+                    /* Burn code here */
+
+
+
+
+
+                    writePacketToSD(ring.getFirst());
+                    break;
+                }
+            }
+            case COAST: {
+                if (apogeeDetect(ring)) {
+                    Serial.printf(F("--Descent--"));
+                    currentFlightState = DESCENT;
+                    apogeeTime = millis();
+                    sdFile.flush();
+                    break;
+                } else {
+                    /* Coast code here */
+
+
+                    // Calculate how long we've been in COAST
+                    uint32_t elapsed = millis() - burnTime; 
+            
+                    float targetRoll = (elapsed < 500) ? 90.0 : 0.0;
+                    bool isReturning = (elapsed >= 500);
+
+                    // Now current_dt is visible and fresh
+                    float deflection = rollCtrl.update(data, targetRoll, isReturning, current_dt);
+
+                    // Map to Servo (1500us center, 10us per degree)
+                    float pulseUs = 1500.0f + (deflection * 10.0f);
+                    // Period at 50Hz is 20,000us
+                    // 16-bit duty cycle (pulse / 20000) * 65535
+                    int pwmValue = (int)((pulseUs / 20000.0f) * 65535.0f);                
+                    for (uint8_t pin : ServoPins) {
+                        analogWrite(pin, pwmValue);
+                    }                
+
+                    writePacketToSD(ring.getFirst());
+                    break;
+                }
+            }
+            case DESCENT: {
+                if (landingDetect(ring)) {
+                    Serial.printf(F("--Landed--"));
+                    currentFlightState = LANDED;
+                    landTime = millis();
+                    sdFile.flush();
+                    break;
+                } else {
+                    /* Descent code here */
+                    writePacketToSD(ring.getFirst());
+                    break;
+                }
+            }
+            case LANDED: {
+                
+                // Close the SD card, it is no longer needed and having it open risk corruption
+                if(SDcardPresent) {
+                    sdFile.flush();
+                    sdFile.close();
+                    SDcardPresent = false;
                 }
                 
-                LSR_Struct preLaunchLoggingFile;
-
-                // Log the entire ring buffer to the SD card.
-                for(size_t i = 0; i < RING_SIZE; i++) {
-                    preLaunchLoggingFile = ring[i];
-                    sdFile.printf("%lu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%d\n", 
-                        millis(), 
-                        preLaunchLoggingFile.AccelX, 
-                        preLaunchLoggingFile.AccelY, 
-                        preLaunchLoggingFile.AccelZ, 
-                        preLaunchLoggingFile.GyroX, 
-                        preLaunchLoggingFile.GyroY, 
-                        preLaunchLoggingFile.GyroZ, 
-                        preLaunchLoggingFile.VelX, 
-                        preLaunchLoggingFile.VelY, 
-                        preLaunchLoggingFile.VelZ, 
-                        preLaunchLoggingFile.PosX, 
-                        preLaunchLoggingFile.PosY, 
-                        preLaunchLoggingFile.PosZ, 
-                        preLaunchLoggingFile.Theta, 
-                        preLaunchLoggingFile.Phi, 
-                        preLaunchLoggingFile.Psi, 
-                        preLaunchLoggingFile.Pressure, 
-                        currentFlightState
-                    );
+                // Transmit the position of where the rocket landed
+                if(radioPresent) {
+                    // int16_t landingTransmitStatus = radio.startTransmit((const uint8_t*)&data, sizeof(data));
+                    // if (landingTransmitStatus != RADIOLIB_ERR_NONE) {
+                    //     Serial.printf("Failed to start transmission, error code: %d\n", landingTransmitStatus);
+                    // }
                 }
-
-                sdFile.flush();
-
-                // Increase the writing frequency to the SD card during flight
-                SDTimer.update(SDWriteFreqMicroseconds / 10.0);
-
                 break;
-            } else {
-                /* Pre-Launch Code goes here */
-                writePacketToSD(ring.getFirst());
+            }
+            default: {
+                delay(100);
                 break;
             }
         }
-        case BURN: {
-            if (burnoutDetect(ring)) {
-                Serial.printf(F("--Burnout--"));
-                currentFlightState = COAST;
-                burnTime = millis();
-                sdFile.flush();
-                break;
-            } else {
-                /* Burn code here */
-                writePacketToSD(ring.getFirst());
-                break;
-            }
-        }
-        case COAST: {
-            if (apogeeDetect(ring)) {
-                Serial.printf(F("--Descent--"));
-                currentFlightState = DESCENT;
-                apogeeTime = millis();
-                sdFile.flush();
-                break;
-            } else {
-                /* Coast code here */
-                writePacketToSD(ring.getFirst());
-                break;
-            }
-        }
-        case DESCENT: {
-            if (landingDetect(ring)) {
-                Serial.printf(F("--Landed--"));
-                currentFlightState = LANDED;
-                landTime = millis();
-                sdFile.flush();
-                break;
-            } else {
-                /* Descent code here */
-                writePacketToSD(ring.getFirst());
-                break;
-            }
-        }
-        case LANDED: {
-            
-            // Close the SD card, it is no longer needed and having it open risk corruption
-            if(SDcardPresent) {
-                sdFile.flush();
-                sdFile.close();
-                SDcardPresent = false;
-            }
-            
-            // Transmit the position of where the rocket landed
-            if(radioPresent) {
-                // int16_t landingTransmitStatus = radio.startTransmit((const uint8_t*)&data, sizeof(data));
-                // if (landingTransmitStatus != RADIOLIB_ERR_NONE) {
-                //     Serial.printf("Failed to start transmission, error code: %d\n", landingTransmitStatus);
-                // }
-            }
-            break;
-        }
-        default: {
-            delay(100);
-            break;
-        }
+        interrupts();
     }
+
 
     /* Kalman Filter and Sensor Reading Code */
     if (millis() - accelAltTimer > (1.0 / accelAltHz) * 1000) {
