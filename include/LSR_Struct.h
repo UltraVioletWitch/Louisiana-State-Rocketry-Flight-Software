@@ -2,6 +2,8 @@
 
 #include <Arduino.h>
 
+const int RING_SIZE = 8;
+
 enum State {
     PRE_LAUNCH,
     BURN,

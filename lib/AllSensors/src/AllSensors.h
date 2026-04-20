@@ -62,7 +62,7 @@ private:
     float bmpSeaLevel_hPa;
 
     // GPS
-    double rocketLatitude, rocketLongitude, rocketSpeed;
+    double rocketLatitude = 0, rocketLongitude = 0, rocketSpeed = 0;
     double lastPrint = 0;
 };
 

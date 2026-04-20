@@ -19,7 +19,6 @@ const float Kp_RET_INNER = 3.0, Ki_RET_INNER = 0.01, Kd_RET_INNER = 0.2;
 // PHYSICAL LIMITS
 const float MAX_FIN_ANGLE = 12.0; // Degrees (Mechanical limit)
 const float MAX_ROLL_RATE = 360.0; // Degrees/Sec (Aerodynamic limit)
-const int FILTER_SAMPLES = 8; // Ring buffer size
 
 // Calculation Constants
 const float RAMP_RATE = 180.0; // ramp to swtich target angle
@@ -28,22 +27,22 @@ const float MIN_DT = 0.0001;   // min dt set very low for 100hz
 
 class LSR_RingBuffer {
 public:
-    float values[FILTER_SAMPLES];
-    int index = 0;
+    float values[RING_SIZE];
+    uint16_t index = 0;
 
     void add(float val) { 
         values[index] = val; 
-        index = (index + 1) % FILTER_SAMPLES; 
+        index = (index + 1) % RING_SIZE; 
     }
 
     float getAvg() {
         float sum = 0;
-        for(int i = 0; i < FILTER_SAMPLES; i++) sum += values[i];
-        return sum / FILTER_SAMPLES;
+        for(int i = 0; i < RING_SIZE; i++) sum += values[i];
+        return sum / RING_SIZE;
     }
 
     void clear() { 
-        for(int i = 0; i < FILTER_SAMPLES; i++) values[i] = 0; 
+        for(int i = 0; i < RING_SIZE; i++) values[i] = 0; 
     }
 };
 

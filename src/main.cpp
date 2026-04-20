@@ -24,7 +24,6 @@ LSR_Struct data;
 State currentFlightState = PRE_LAUNCH;
 
 // ring buffer
-const int RING_SIZE = 8;
 static RingBuffer<RING_SIZE> ring;
 
 // detect function prototypes
@@ -32,6 +31,8 @@ bool launchDetect(const RingBuffer<RING_SIZE>&);
 bool burnoutDetect(const RingBuffer<RING_SIZE>&);
 bool apogeeDetect(const RingBuffer<RING_SIZE>&);
 bool landingDetect(const RingBuffer<RING_SIZE>&);
+const float IMUAccelNoiseFilteringValue = 0.2;
+const float IMUGyroNoiseFilteringValue = 0.2;
 
 // time logs
 unsigned long launchTime;
@@ -58,6 +59,7 @@ const uint8_t radioDIO1Pin = 30;
 const uint8_t radioDIO2Pin = 27;
 const float EBYTE_FREQ = 912.3;
 SX1262 radio = new Module(radioCSPin, radioDIO1Pin, radioResetPin, radioBusyPin, SPI, spiSettings);
+// SX1262 radio = new Module(radioCSPin, radioDIO1Pin, radioResetPin, radioBusyPin);
 
 // Servo Pins
 LSR_RollController rollCtrl;
@@ -105,7 +107,7 @@ void setup() {
     } else {
         SDcardPresent = true;
 
-        if(!SDTimer.begin(SDWriteTimerCallback, SDWriteFreqMicroseconds)) {
+        if(!SDTimer.begin(SDWriteTimerCallback, SDWriteFreqMicroseconds / 10)) {
             Serial.printf(F("SD Timer Failed\n"));
         }
 
@@ -214,14 +216,31 @@ void loop() {
         sensors.lsmDataReadyInt2 = false;
 
         // Calculate dt using microsecond precision
-        static uint32_t lastMicros = 0;
+        static uint32_t lastMicros;
         uint32_t currentMicros = micros();
         if (lastMicros == 0) lastMicros = currentMicros;
         float current_dt = (float)(currentMicros - lastMicros) / 1000000.0f;
+        if(current_dt <= 0) {
+            current_dt = 0.01;
+        }
         lastMicros = currentMicros;
 
         // READ SENSORS ONCE
         sensors.updateNoKalmanFilter(data);
+
+        // Find the velocity and filter small noise values to prevent drift
+        if(abs(data.AccelX) > IMUAccelNoiseFilteringValue) {
+            data.VelX += data.AccelX * current_dt;
+            data.VelY += data.AccelY * current_dt;
+            data.VelZ += data.AccelZ * current_dt;
+        }
+
+        if(abs(data.GyroX) > IMUGyroNoiseFilteringValue) {
+            data.Theta += degrees(data.GyroX) * current_dt;
+            data.Phi += degrees(data.GyroY) * current_dt;
+            data.Psi += degrees(data.GyroZ) * current_dt;
+        }
+        
         ring.push(data);
 
 
@@ -633,7 +652,7 @@ void writePacketToSD(const LSR_Struct& data) {
     if (sdFile) {
 
         sdBuffer.printf("%lu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%d\n", 
-            millis(), 
+            data.TimeStamp, 
             data.AccelX, 
             data.AccelY, 
             data.AccelZ, 
