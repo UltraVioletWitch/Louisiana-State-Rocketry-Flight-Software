@@ -100,6 +100,17 @@ class RingBuffer {
             return ring[last_ptr];
         }
 
+        LSR_Struct getPrev(void) const {
+            int last_ptr;
+            if (ring_ptr == 0) {
+                last_ptr = N - 1;
+            } else {
+                last_ptr = ring_ptr - 1;
+            }
+
+            return ring[last_ptr];
+        }
+
         bool isFull(void) const {
             return full;
         }

@@ -11,7 +11,7 @@
 #define __TEST__ 1
 
 // GPS on Serial2, LSM CS=24, BMP CS=0
-AllSensors sensors(Serial2, 9600, 24, 0);
+AllSensors sensors(&Serial2, 9600, 24, 0);
 static const SPISettings spiSettings(1000000UL, MSBFIRST, SPI_MODE0); // What the default adafruit sensors use for SPI settings
 unsigned long accelAltTimer, GPSTimer;
 const float accelAltHz = 100;
@@ -24,7 +24,7 @@ LSR_Struct data;
 State currentFlightState = PRE_LAUNCH;
 
 // ring buffer
-static RingBuffer<RING_SIZE> ring;
+RingBuffer<RING_SIZE> ring;
 
 // detect function prototypes
 bool launchDetect(const RingBuffer<RING_SIZE>&);
@@ -32,7 +32,7 @@ bool burnoutDetect(const RingBuffer<RING_SIZE>&);
 bool apogeeDetect(const RingBuffer<RING_SIZE>&);
 bool landingDetect(const RingBuffer<RING_SIZE>&);
 const float IMUAccelNoiseFilteringValue = 0.2;
-const float IMUGyroNoiseFilteringValue = 0.2;
+const float IMUGyroNoiseFilteringValue = 0.0;
 
 // time logs
 unsigned long launchTime;
@@ -70,7 +70,6 @@ Servo servos[4]; // Change the servo library frequency from 20,000 to 4,000
 const uint16_t minPulse = 1100;
 const uint16_t maxPulse = 1900; 
 const uint16_t neutralPulse = 1500; 
-
 
 // Initalized variables 
 bool SDcardPresent = false;
@@ -203,6 +202,18 @@ void loop() {
                 for(uint8_t pins = 0; pins < numberOfServos; pins++) {
                     servos[pins].writeMicroseconds(neutralPulse);
                 }
+            } else if(serialTestCommand.equalsIgnoreCase("REBOOT")) {
+                if(sdFile) {
+                    sdFile.flush();
+                    sdFile.close();
+                }
+                _reboot_Teensyduino_();
+            } else if(serialTestCommand.equalsIgnoreCase("RESTART")) {
+                if(sdFile) {
+                    sdFile.flush();
+                    sdFile.close();
+                }
+                _restart_Teensyduino_();
             }
             else {
                 Serial.printf(F("Invalid Serial Command\n"));
@@ -211,7 +222,6 @@ void loop() {
     #endif
 
     if (sensors.lsmDataReadyInt1 || sensors.lsmDataReadyInt2) { 
-        noInterrupts();
         sensors.lsmDataReadyInt1 = false;
         sensors.lsmDataReadyInt2 = false;
 
@@ -227,22 +237,7 @@ void loop() {
 
         // READ SENSORS ONCE
         sensors.updateNoKalmanFilter(data);
-
-        // Find the velocity and filter small noise values to prevent drift
-        if(abs(data.AccelX) > IMUAccelNoiseFilteringValue) {
-            data.VelX += data.AccelX * current_dt;
-            data.VelY += data.AccelY * current_dt;
-            data.VelZ += data.AccelZ * current_dt;
-        }
-
-        if(abs(data.GyroX) > IMUGyroNoiseFilteringValue) {
-            data.Theta += degrees(data.GyroX) * current_dt;
-            data.Phi += degrees(data.GyroY) * current_dt;
-            data.Psi += degrees(data.GyroZ) * current_dt;
-        }
-        
         ring.push(data);
-
 
         switch (currentFlightState) {
             case PRE_LAUNCH: {
@@ -251,42 +246,6 @@ void loop() {
                     currentFlightState = BURN;
                     launchTime = millis();
                     /* code to log entire ring goes here */
-                    if(!SDcardPresent) {
-                        break;
-                    }
-
-                    if (!sdFile) {
-                        break;
-                    }
-                    
-                    LSR_Struct preLaunchLoggingFile;
-
-                    // Log the entire ring buffer to the SD card.
-                    for(size_t i = 0; i < RING_SIZE; i++) {
-                        preLaunchLoggingFile = ring[i];
-                        sdFile.printf("%lu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%d\n", 
-                            millis(), 
-                            preLaunchLoggingFile.AccelX, 
-                            preLaunchLoggingFile.AccelY, 
-                            preLaunchLoggingFile.AccelZ, 
-                            preLaunchLoggingFile.GyroX, 
-                            preLaunchLoggingFile.GyroY, 
-                            preLaunchLoggingFile.GyroZ, 
-                            preLaunchLoggingFile.VelX, 
-                            preLaunchLoggingFile.VelY, 
-                            preLaunchLoggingFile.VelZ, 
-                            preLaunchLoggingFile.PosX, 
-                            preLaunchLoggingFile.PosY, 
-                            preLaunchLoggingFile.PosZ, 
-                            preLaunchLoggingFile.Theta, 
-                            preLaunchLoggingFile.Phi, 
-                            preLaunchLoggingFile.Psi, 
-                            preLaunchLoggingFile.Pressure, 
-                            currentFlightState
-                        );
-                    }
-
-                    sdFile.flush();
 
                     // Increase the writing frequency to the SD card during flight
                     SDTimer.update(SDWriteFreqMicroseconds / 10.0);
@@ -326,12 +285,13 @@ void loop() {
                 } else {
                     /* Coast code here */
 
-
                     // Calculate how long we've been in COAST
                     uint32_t elapsed = millis() - burnTime; 
             
-                    float targetRoll = (elapsed < 500) ? 90.0 : 0.0;
-                    bool isReturning = (elapsed >= 500);
+                    // float targetRoll = (elapsed < 500) ? 90.0 : 0.0;
+                    // bool isReturning = (elapsed >= 500);
+                    float targetRoll = 90.0;
+                    bool isReturning = false;
 
                     // Now current_dt is visible and fresh
                     float deflection = rollCtrl.update(data, targetRoll, isReturning, current_dt);
@@ -340,10 +300,14 @@ void loop() {
                     float pulseUs = 1500.0f + (deflection * 10.0f);
                     // Period at 50Hz is 20,000us
                     // 16-bit duty cycle (pulse / 20000) * 65535
-                    int pwmValue = (int)((pulseUs / 20000.0f) * 65535.0f);                
-                    for (uint8_t pin : ServoPins) {
-                        analogWrite(pin, pwmValue);
-                    }                
+                    int pwmValue = (int)((pulseUs / 20000.0f) * 65535.0f); 
+                    
+                    int pulseValue = map(deflection, -MAX_FIN_ANGLE, MAX_FIN_ANGLE, 1500 + ((800 / 90.0) * -MAX_FIN_ANGLE), 1500 + ((800 / 90.0) * MAX_FIN_ANGLE));
+                    for (uint8_t pin = 0; pin < numberOfServos; pin++) {
+                        // analogWrite(pin, pwmValue);
+                        // servos[pin].writeMicroseconds(pulseValue);
+                    }  
+                    
 
                     writePacketToSD(ring.getFirst());
                     break;
@@ -385,7 +349,6 @@ void loop() {
                 break;
             }
         }
-        interrupts();
     }
 
 
@@ -451,12 +414,12 @@ bool launchDetect(const RingBuffer<RING_SIZE>& ring) {
 
     // Check if the altitude is increasing
     if(averagePressureAltitudeDifferential >= altimeterThreshold) {
-        altitudeIncreasing = true;
-    } else {
         altitudeIncreasing = false;
+    } else {
+        altitudeIncreasing = true;
     }
 
-    if((accelCount >= samplesRequired) && altitudeIncreasing) {
+    if((accelCount >= samplesRequired) && !altitudeIncreasing) {
         return true;
     }
     
@@ -538,6 +501,10 @@ bool burnoutDetect(const RingBuffer<RING_SIZE>& ring) {
 }
 
 bool apogeeDetect(const RingBuffer<RING_SIZE>& ring) {
+    #if __TEST__
+        // return false;
+    #endif
+
     // Initalize variables for apogee detection
     float averageVelZ = 0;
     float averagePressure = 0;

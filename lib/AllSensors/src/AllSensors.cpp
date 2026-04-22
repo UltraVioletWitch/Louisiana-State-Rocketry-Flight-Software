@@ -1,15 +1,26 @@
 #include "AllSensors.h"
 #include <math.h>
-
+extern RingBuffer<RING_SIZE> ring;
 // Constructor
-AllSensors::AllSensors(HardwareSerial &serial, uint32_t baud, int lsmCSPin, int bmpCSPin)
-    : gpsSerial(serial), gpsBaud(baud), lsmCS(lsmCSPin), bmpCS(bmpCSPin) {}
+AllSensors::AllSensors(HardwareSerial *gpsSerialHardware, uint32_t baud, int lsmCSPin, int bmpCSPin)
+    : gpsSerialHardware(gpsSerialHardware), gpsBaud(baud), lsmCS(lsmCSPin), bmpCS(bmpCSPin) {}
 
+AllSensors::AllSensors(SoftwareSerial *gpsSerialSoftware, uint32_t baud, int lsmCSPin, int bmpCSPin)
+    : gpsSerialSoftware(gpsSerialSoftware), gpsBaud(baud), lsmCS(lsmCSPin), bmpCS(bmpCSPin) {}    
 // Initialize sensors
 bool AllSensors::begin() {
     bool success = true;
     // GPS
-    gpsSerial.begin(gpsBaud);
+    if(gpsSerialHardware) {
+        gpsSerialHardware->begin(gpsBaud);
+        Serial.println(F("=== GPS Initialized ==="));
+    } else if (gpsSerialSoftware) {
+        gpsSerialSoftware->begin(gpsBaud);
+        Serial.println(F("=== GPS Initialized ==="));
+    } else {
+        Serial.println(F("No GPS serial interface provided!"));
+        success = false;
+    }
     Serial.println(F("=== GPS Initialized ==="));
 
     // LSM6DSO32 SPI
@@ -22,8 +33,9 @@ bool AllSensors::begin() {
         lsm.setAccelRange(LSM6DSO32_ACCEL_RANGE_32_G);
         lsm.setAccelDataRate(LSM6DS_RATE_104_HZ);
 
-        lsm.setGyroRange(LSM6DS_GYRO_RANGE_125_DPS);
+        lsm.setGyroRange(LSM6DS_GYRO_RANGE_250_DPS);
         lsm.setGyroDataRate(LSM6DS_RATE_104_HZ);
+        // lsm.highPassFilter(true,   LSM6DS_HPF_ODR_DIV_50);
 
         lsm.configIntOutputs(true, false);
         lsm.configInt1(false, true, false);
@@ -150,29 +162,52 @@ void AllSensors::update() {
 }
 
 void AllSensors::updateNoKalmanFilter(LSR_Struct& packet) {
-    // Adafruit_LSM6DS_Accelerometer accelSensor(&lsm);
-    // Adafruit_LSM6DS_Gyro gyroSensor(&lsm);
-    // Adafruit_LSM6DS_Temp tempSensor(&lsm);
+    static size_t lastMicros;
+    size_t currentMicros = micros();
+    float deltaMicros = (currentMicros - lastMicros) / 1000000.0;
 
-    // if(lsmDataReadyInt1) {
-    //     lsmDataReadyInt1 = false;
-    //     accelSensor.getEvent(&accel);
-    //     tempSensor.getEvent(&temp);
-    //     Serial.printf(F("Accel Data Ready Interrupt Triggered\n"));
-    // }
+    if(deltaMicros <= 0) {
+        deltaMicros = 0.0001;
+    }
 
-    // if(lsmDataReadyInt2) {
-    //     lsmDataReadyInt2 = false;
-    //     gyroSensor.getEvent(&gyro);
-    //     tempSensor.getEvent(&temp);
-    // }
-
+    // Adafruit Library returns gyro data in rad/s by default!!!
     lsm.getEvent(&accel, &gyro, &temp);
+
+    // TODO: Handle gravity for the velocity calculation to prevent higher velocity readings
+    if(abs(accel.acceleration.x) > accelBiasX) {
+        velocityX += accel.acceleration.x * deltaMicros;
+    }
+    if(abs(accel.acceleration.y) > accelBiasY) {
+        velocityY += accel.acceleration.y * deltaMicros;
+    }
+    if(abs(accel.acceleration.z) > accelBiasZ) {
+        velocityZ += accel.acceleration.z * deltaMicros;
+    }
+
+    if(abs(gyro.gyro.x) > gyroBiasX) {
+        gyroX += degrees(gyro.gyro.x) * deltaMicros;
+    }
+    if(abs(gyro.gyro.y) > gyroBiasY) {
+        gyroY += degrees(gyro.gyro.y) * deltaMicros;
+    }
+    if(abs(gyro.gyro.z) > gyroBiasZ) {
+        gyroZ += degrees(gyro.gyro.z) * deltaMicros;
+    }
+
+    lastMicros = currentMicros;
 
     bmp.performReading();
 
-    while(gpsSerial.available()) {
-        gps.encode(gpsSerial.read());
+    if(gpsSerialHardware) {
+        while(gpsSerialHardware->available()) {
+            gps.encode(gpsSerialHardware->read());
+        }
+    } else if (gpsSerialSoftware) {
+        while(gpsSerialSoftware->available()) {
+            gps.encode(gpsSerialSoftware->read());
+        }
+    } else {
+        Serial.println(F("No GPS serial interface provided!"));
     }
 
     if(gps.location.isValid()) {
@@ -192,13 +227,17 @@ void AllSensors::updateNoKalmanFilter(LSR_Struct& packet) {
         gyro.gyro.x,
         gyro.gyro.y,
         gyro.gyro.z,
-        0, 0, float(rocketSpeed),
+        velocityX,
+        velocityY, 
+        velocityZ,
         float(rocketLatitude),
         float(rocketLongitude),
-        bmp.readAltitude(bmpSeaLevel_hPa),
-        0, 0, 0,
+        bmp.readAltitude(bmpSeaLevel_hPa), // This is giving weird results!
+        gyroX, 
+        gyroY, 
+        gyroZ,
         float(bmp.pressure / 100),
-        float(temp.temperature),
+        float(temp.temperature)
     };
 }
 

@@ -3,6 +3,7 @@
 #include <SPI.h>
 #include <Adafruit_LSM6DSO32.h>
 #include <Adafruit_BMP3XX.h>
+#include <SoftwareSerial.h>
 #include <TinyGPS++.h>
 #include <LSR_Struct.h>
 
@@ -11,7 +12,8 @@
 class AllSensors {
 public:
     // Constructor: GPS UART, baud, LSM CS, BMP CS
-    AllSensors(HardwareSerial &gpsSerial, uint32_t gpsBaud = 9600, int lsmCS = 24, int bmpCS = 0);
+    AllSensors(HardwareSerial *gpsSerialHardware, uint32_t gpsBaud = 9600, int lsmCS = 24, int bmpCS = 0);
+    AllSensors(SoftwareSerial *gpsSerialSoftware, uint32_t gpsBaud = 9600, int lsmCS = 24, int bmpCS = 0);
 
     // Initialize all sensors
     bool begin();
@@ -45,19 +47,24 @@ public:
 
 private:
     // GPS
-    HardwareSerial &gpsSerial;
+    HardwareSerial *gpsSerialHardware = nullptr;
+    SoftwareSerial *gpsSerialSoftware = nullptr;
     uint32_t gpsBaud;
     TinyGPSPlus gps;
 
     // IMU
     Adafruit_LSM6DSO32 lsm;
-    int lsmCS;
+    uint8_t lsmCS;
     sensors_event_t accel, gyro, temp;
     const uint8_t lsmInterruptPin1 = 25, lsmInterruptPin2 = 26;
+    const float gyroBiasX = 0.2, gyroBiasY = 0.2, gyroBiasZ = 0.2;
+    const float accelBiasX = 0.2, accelBiasY = 0.2, accelBiasZ = 0.2;
+    float velocityX = 0, velocityY = 0, velocityZ = 0;
+    float gyroX = 0, gyroY = 0, gyroZ = 0;
 
     // BMP390
     Adafruit_BMP3XX bmp;
-    int bmpCS;
+    uint8_t bmpCS;
     volatile bool bmpDataReady;
     float bmpSeaLevel_hPa;
 
