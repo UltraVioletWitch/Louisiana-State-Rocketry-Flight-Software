@@ -1,27 +1,29 @@
 #include "AllSensors.h"
 #include <math.h>
+#include "constants.h"
+
 extern RingBuffer<RING_SIZE> ring;
 // Constructor
-AllSensors::AllSensors(HardwareSerial *gpsSerialHardware, uint32_t baud, int lsmCSPin, int bmpCSPin)
+AllSensors::AllSensors(HardwareSerial *gpsSerialHardware, uint32_t baud, uint8_t lsmCSPin, uint8_t bmpCSPin)
     : gpsSerialHardware(gpsSerialHardware), gpsBaud(baud), lsmCS(lsmCSPin), bmpCS(bmpCSPin) {}
 
-AllSensors::AllSensors(SoftwareSerial *gpsSerialSoftware, uint32_t baud, int lsmCSPin, int bmpCSPin)
+AllSensors::AllSensors(SoftwareSerial *gpsSerialSoftware, uint32_t baud, uint8_t lsmCSPin, uint8_t bmpCSPin)
     : gpsSerialSoftware(gpsSerialSoftware), gpsBaud(baud), lsmCS(lsmCSPin), bmpCS(bmpCSPin) {}    
+
 // Initialize sensors
 bool AllSensors::begin() {
     bool success = true;
     // GPS
     if(gpsSerialHardware) {
         gpsSerialHardware->begin(gpsBaud);
-        Serial.println(F("=== GPS Initialized ==="));
+        Serial.println(F("=== GPS Initialized via Hardware Serial ==="));
     } else if (gpsSerialSoftware) {
         gpsSerialSoftware->begin(gpsBaud);
-        Serial.println(F("=== GPS Initialized ==="));
+        Serial.println(F("=== GPS Initialized via Software Serial ==="));
     } else {
         Serial.println(F("No GPS serial interface provided!"));
         success = false;
     }
-    Serial.println(F("=== GPS Initialized ==="));
 
     // LSM6DSO32 SPI
     if (!lsm.begin_SPI(lsmCS)) {
@@ -54,23 +56,20 @@ bool AllSensors::begin() {
     }
 
     calibrateBMPSeaLevel();
+    calibrateIMUGravityBias();
 
     return success;
 }
 
 // Manually calibrate BMP sea-level pressure
 void AllSensors::calibrateBMPSeaLevel(void) {
-    elapsedMillis timeBetweenPressureReadings;
-    
     for (int i = 0; i < 10; i++) {
-        if(timeBetweenPressureReadings > 100) {
-            bmp.performReading();
-            timeBetweenPressureReadings = 0;
-        }
+        bmp.performReading();
+        delay(15);
     }
 
     float sumPressure = 0;
-    int numReadings = 50;
+    uint16_t numReadings = 50;
     for (int i = 0; i < numReadings; i++) {
         bmp.performReading();
         sumPressure += bmp.pressure / 100.0;
@@ -78,6 +77,33 @@ void AllSensors::calibrateBMPSeaLevel(void) {
     bmpSeaLevel_hPa = sumPressure / numReadings;
     Serial.print(F("BMP sea-level pressure manually set to: "));
     Serial.println(bmpSeaLevel_hPa);
+}
+
+void AllSensors::calibrateIMUGravityBias(void) {
+    // This is to adjust to gravity bias on the accelerometer when the rocket is at rest
+    const uint16_t numReadings = 100;
+    float sumAccelX = 0, sumAccelY = 0, sumAccelZ = 0;
+    for (int i = 0; i < numReadings; i++) {
+        lsm.getEvent(&accel, &gyro, &temp);
+        sumAccelX += accel.acceleration.x - accelBiasX;
+        sumAccelY += accel.acceleration.y - accelBiasY;
+        sumAccelZ += accel.acceleration.z - accelBiasZ;
+        delay(10);
+    }
+
+    sumAccelX /= numReadings;
+    sumAccelY /= numReadings;
+    sumAccelZ /= numReadings;
+
+    if(abs(sumAccelX) > accelBiasX * 1.25) {
+        sumAccelX > 0 ? accelBiasX += sumAccelX : accelBiasX -= sumAccelX;
+    }
+    if(abs(sumAccelY) > accelBiasY * 1.25) {
+        sumAccelY > 0 ? accelBiasY += sumAccelY : accelBiasY -= sumAccelY;
+    }
+    if(abs(sumAccelZ) > accelBiasZ * 1.25) {
+        sumAccelZ > 0 ? accelBiasZ += sumAccelZ : accelBiasZ -= sumAccelZ;
+    }
 }
 
 // Get the altitude from the BMP
@@ -218,27 +244,53 @@ void AllSensors::updateNoKalmanFilter(LSR_Struct& packet) {
     if(gps.speed.isValid()) {
         rocketSpeed = gps.speed.mps();
     }
+    
+    #if __TEST__
 
-    packet = {
-        millis(),
-        accel.acceleration.x,
-        accel.acceleration.y,
-        accel.acceleration.z,
-        gyro.gyro.x,
-        gyro.gyro.y,
-        gyro.gyro.z,
-        velocityX,
-        velocityY, 
-        velocityZ,
-        float(rocketLatitude),
-        float(rocketLongitude),
-        bmp.readAltitude(bmpSeaLevel_hPa), // This is giving weird results!
-        gyroX, 
-        gyroY, 
-        gyroZ,
-        float(bmp.pressure / 100),
-        float(temp.temperature)
-    };
+        packet = {
+            millis(),
+            accel.acceleration.x,
+            accel.acceleration.y,
+            accel.acceleration.z,
+            gyro.gyro.x,
+            gyro.gyro.y,
+            gyro.gyro.z,
+            velocityX,
+            velocityY, 
+            velocityZ,
+            float(rocketLatitude),
+            float(rocketLongitude),
+            bmp.readAltitude(bmpSeaLevel_hPa), // This is giving weird results!
+            gyroX, 
+            gyroY, 
+            gyroZ,
+            float(bmp.pressure / 100),
+            float(temp.temperature)
+        };
+
+    #else 
+
+        packet = {
+            millis(),
+            accel.acceleration.z,
+            accel.acceleration.y,
+            -accel.acceleration.x,
+            gyro.gyro.x,
+            gyro.gyro.y,
+            gyro.gyro.z,
+            velocityX,
+            velocityY, 
+            velocityZ,
+            float(rocketLatitude),
+            float(rocketLongitude),
+            bmp.readAltitude(bmpSeaLevel_hPa), // This is giving weird results!
+            gyroX, 
+            gyroY, 
+            gyroZ,
+            float(bmp.pressure / 100),
+            float(temp.temperature)
+        };
+    #endif
 }
 
 void AllSensors::dataReadyLSMInt1(void) {

@@ -12,8 +12,8 @@
 class AllSensors {
 public:
     // Constructor: GPS UART, baud, LSM CS, BMP CS
-    AllSensors(HardwareSerial *gpsSerialHardware, uint32_t gpsBaud = 9600, int lsmCS = 24, int bmpCS = 0);
-    AllSensors(SoftwareSerial *gpsSerialSoftware, uint32_t gpsBaud = 9600, int lsmCS = 24, int bmpCS = 0);
+    AllSensors(HardwareSerial *gpsSerialHardware, uint32_t gpsBaud = 9600, uint8_t lsmCS = 24, uint8_t bmpCS = 0);
+    AllSensors(SoftwareSerial *gpsSerialSoftware, uint32_t gpsBaud = 9600, uint8_t lsmCS = 24, uint8_t bmpCS = 0);
 
     // Initialize all sensors
     bool begin();
@@ -34,6 +34,7 @@ public:
 
     // Manually set BMP sea-level pressure
     void calibrateBMPSeaLevel(void);
+    void calibrateIMUGravityBias(void);
 
     // Get the altitude from the BMP
     const float getAltitudeBMP(void);
@@ -54,17 +55,17 @@ private:
 
     // IMU
     Adafruit_LSM6DSO32 lsm;
-    uint8_t lsmCS;
+    const uint8_t lsmCS;
     sensors_event_t accel, gyro, temp;
     const uint8_t lsmInterruptPin1 = 25, lsmInterruptPin2 = 26;
-    const float gyroBiasX = 0.2, gyroBiasY = 0.2, gyroBiasZ = 0.2;
-    const float accelBiasX = 0.2, accelBiasY = 0.2, accelBiasZ = 0.2;
+    float gyroBiasX = 0.2, gyroBiasY = 0.2, gyroBiasZ = 0.2;
+    float accelBiasX = 0.2, accelBiasY = 0.2, accelBiasZ = 0.2;
     float velocityX = 0, velocityY = 0, velocityZ = 0;
     float gyroX = 0, gyroY = 0, gyroZ = 0;
 
     // BMP390
     Adafruit_BMP3XX bmp;
-    uint8_t bmpCS;
+    const uint8_t bmpCS;
     volatile bool bmpDataReady;
     float bmpSeaLevel_hPa;
 

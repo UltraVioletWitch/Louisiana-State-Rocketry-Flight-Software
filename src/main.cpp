@@ -3,15 +3,17 @@
 #include "LSR_Struct.h"
 #include "PID.h"
 #include <RadioLib.h>
-#include <Servo.h>
-#include <SPI.h>
 #include <SdFat.h>
+#include <Servo.h>
+#include <SoftwareSerial.h>
+#include <SPI.h>
 #include <RingBuf.h>
 
-#define __TEST__ 1
+#include "constants.h"
 
 // GPS on Serial2, LSM CS=24, BMP CS=0
-AllSensors sensors(&Serial2, 9600, 24, 0);
+SoftwareSerial gpsSerial(CORE_RXD7_PIN, CORE_TXD7_PIN);
+AllSensors sensors(&gpsSerial, 9600, 24, 0);
 static const SPISettings spiSettings(1000000UL, MSBFIRST, SPI_MODE0); // What the default adafruit sensors use for SPI settings
 unsigned long accelAltTimer, GPSTimer;
 const float accelAltHz = 100;
@@ -31,8 +33,6 @@ bool launchDetect(const RingBuffer<RING_SIZE>&);
 bool burnoutDetect(const RingBuffer<RING_SIZE>&);
 bool apogeeDetect(const RingBuffer<RING_SIZE>&);
 bool landingDetect(const RingBuffer<RING_SIZE>&);
-const float IMUAccelNoiseFilteringValue = 0.2;
-const float IMUGyroNoiseFilteringValue = 0.0;
 
 // time logs
 unsigned long launchTime;
@@ -185,8 +185,14 @@ void loop() {
                 uint8_t count = 0;
                 uint16_t angle = neutralPulse; 
                 uint16_t increament = 4;
+                const uint16_t servoSweepDelay = 5; 
+                elapsedMillis servoSweepTimer = 0;
                 while(count < 4) {
-
+                    if(servoSweepTimer < servoSweepDelay) {
+                        continue;
+                    }
+                     
+                    servoSweepTimer = 0;
                     angle += increament;
                     if(angle > maxPulse || angle <= minPulse) {
                         increament = -increament;
@@ -196,7 +202,6 @@ void loop() {
                     for(uint8_t pins = 0; pins < numberOfServos; pins++) {
                         servos[pins].writeMicroseconds(angle);
                     }
-                    delay(5);
                 }
 
                 for(uint8_t pins = 0; pins < numberOfServos; pins++) {
@@ -208,14 +213,7 @@ void loop() {
                     sdFile.close();
                 }
                 _reboot_Teensyduino_();
-            } else if(serialTestCommand.equalsIgnoreCase("RESTART")) {
-                if(sdFile) {
-                    sdFile.flush();
-                    sdFile.close();
-                }
-                _restart_Teensyduino_();
-            }
-            else {
+            } else {
                 Serial.printf(F("Invalid Serial Command\n"));
             } 
         }
@@ -267,10 +265,6 @@ void loop() {
                 } else {
                     /* Burn code here */
 
-
-
-
-
                     writePacketToSD(ring.getFirst());
                     break;
                 }
@@ -281,33 +275,45 @@ void loop() {
                     currentFlightState = DESCENT;
                     apogeeTime = millis();
                     sdFile.flush();
+
+                    for (uint8_t pin = 0; pin < numberOfServos; pin++) {
+                        servos[pin].writeMicroseconds(neutralPulse);
+                    }
+                    
                     break;
                 } else {
                     /* Coast code here */
 
                     // Calculate how long we've been in COAST
-                    uint32_t elapsed = millis() - burnTime; 
-            
-                    // float targetRoll = (elapsed < 500) ? 90.0 : 0.0;
-                    // bool isReturning = (elapsed >= 500);
+                    uint32_t elapsed = millis() - burnTime;
+                    static bool isReturning;
                     float targetRoll = 90.0;
-                    bool isReturning = false;
+                    const uint16_t angleThreshold = 2;
+                    const uint32_t returnTimeThreshold = 1000;
 
-                    // Now current_dt is visible and fresh
-                    float deflection = rollCtrl.update(data, targetRoll, isReturning, current_dt);
+                    if(isReturning) {
+                        targetRoll = 0.0;
+                    } else {
+                        targetRoll = 90.0;
+                    }
 
-                    // Map to Servo (1500us center, 10us per degree)
-                    float pulseUs = 1500.0f + (deflection * 10.0f);
-                    // Period at 50Hz is 20,000us
-                    // 16-bit duty cycle (pulse / 20000) * 65535
-                    int pwmValue = (int)((pulseUs / 20000.0f) * 65535.0f); 
-                    
+                    float deflection = rollCtrl.update(data, targetRoll, isReturning, current_dt);               
                     int pulseValue = map(deflection, -MAX_FIN_ANGLE, MAX_FIN_ANGLE, 1500 + ((800 / 90.0) * -MAX_FIN_ANGLE), 1500 + ((800 / 90.0) * MAX_FIN_ANGLE));
-                    for (uint8_t pin = 0; pin < numberOfServos; pin++) {
-                        // analogWrite(pin, pwmValue);
-                        // servos[pin].writeMicroseconds(pulseValue);
-                    }  
+
+                    if(data.Theta > targetRoll + angleThreshold || data.Theta < targetRoll - angleThreshold)  { 
+                        for (uint8_t pin = 0; pin < numberOfServos; pin++) {
+                            servos[pin].writeMicroseconds(pulseValue);
+                        }
+
+                    } else {
+
+                        static elapsedMillis returnTimer;
+                        if(returnTimer > returnTimeThreshold) {
+                            isReturning = true;
+                        }
+                    }
                     
+                    Serial.printf("Target Roll: %.2f\n, Theta: %.2f\n, Pulse: %d\n\n", targetRoll, data.Theta, pulseValue);
 
                     writePacketToSD(ring.getFirst());
                     break;
@@ -502,7 +508,7 @@ bool burnoutDetect(const RingBuffer<RING_SIZE>& ring) {
 
 bool apogeeDetect(const RingBuffer<RING_SIZE>& ring) {
     #if __TEST__
-        // return false;
+        return false;
     #endif
 
     // Initalize variables for apogee detection
