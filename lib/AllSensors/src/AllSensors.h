@@ -41,7 +41,7 @@ public:
     const float getAltitudeBMP(float pressure_hPa);
 
     // Get the sea-level pressure from the BMP
-    const float getSeaLevelPressure(void); 
+    const float getSeaLevelPressure(void);
 
     volatile bool lsmDataReadyInt1; // gyro drdy
     volatile bool lsmDataReadyInt2; // accel drdy

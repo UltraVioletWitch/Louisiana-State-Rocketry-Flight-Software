@@ -21,6 +21,9 @@ const float GPSHz = 10;
 void changeIMUInterruptPin1(void);
 void changeIMUInterruptPin2(void);
 
+const uint8_t LEFT_LED_PIN = 38;
+const uint8_t RIGHT_LED_PIN = 39;
+
 // data structure
 LSR_Struct data;
 State currentFlightState = PRE_LAUNCH;
@@ -148,6 +151,9 @@ void setup() {
         servos[pin].attach(ServoPins[pin]);
         servos[pin].writeMicroseconds(neutralPulse);
     } 
+
+    pinMode(LEFT_LED_PIN, OUTPUT);
+    pinMode(RIGHT_LED_PIN, OUTPUT);
 
     accelAltTimer = millis();
     GPSTimer = millis();
@@ -279,6 +285,9 @@ void loop() {
                     for (uint8_t pin = 0; pin < numberOfServos; pin++) {
                         servos[pin].writeMicroseconds(neutralPulse);
                     }
+
+                    digitalWrite(LEFT_LED_PIN, LOW);
+                    digitalWrite(RIGHT_LED_PIN, LOW);
                     
                     break;
                 } else {
@@ -293,12 +302,16 @@ void loop() {
 
                     if(isReturning) {
                         targetRoll = 0.0;
+                        digitalWrite(LEFT_LED_PIN, LOW);
+                        digitalWrite(RIGHT_LED_PIN, HIGH);
                     } else {
                         targetRoll = 90.0;
+                        digitalWrite(LEFT_LED_PIN, HIGH);
+                        digitalWrite(RIGHT_LED_PIN, LOW);
                     }
 
                     float deflection = rollCtrl.update(data, targetRoll, isReturning, current_dt);               
-                    int pulseValue = map(deflection, -MAX_FIN_ANGLE, MAX_FIN_ANGLE, 1500 + ((800 / 90.0) * -MAX_FIN_ANGLE), 1500 + ((800 / 90.0) * MAX_FIN_ANGLE));
+                    int pulseValue = int(map(deflection, -MAX_FIN_ANGLE, MAX_FIN_ANGLE, 1500 + ((800 / 90.0) * -MAX_FIN_ANGLE), 1500 + ((800 / 90.0) * MAX_FIN_ANGLE)));
 
                     if(data.Theta > targetRoll + angleThreshold || data.Theta < targetRoll - angleThreshold)  { 
                         for (uint8_t pin = 0; pin < numberOfServos; pin++) {
@@ -420,12 +433,12 @@ bool launchDetect(const RingBuffer<RING_SIZE>& ring) {
 
     // Check if the altitude is increasing
     if(averagePressureAltitudeDifferential >= altimeterThreshold) {
-        altitudeIncreasing = false;
-    } else {
         altitudeIncreasing = true;
+    } else {
+        altitudeIncreasing = false;
     }
 
-    if((accelCount >= samplesRequired) && !altitudeIncreasing) {
+    if((accelCount >= samplesRequired) && altitudeIncreasing) {
         return true;
     }
     
@@ -435,33 +448,26 @@ bool launchDetect(const RingBuffer<RING_SIZE>& ring) {
 bool burnoutDetect(const RingBuffer<RING_SIZE>& ring) {
     // Initalize variables for burnout detection
     float averageAccelZ = 0;
-    float averageVelZ = 0;
     float averagePressure = 0;
     static float prevAverageAccelZ;
-    static float prevAverageVelZ;
     static float prevAveragePressureToAltitude;
-    bool velocityDecreasing = false;
     bool altitudeIncreasing = false;
 
     // Get the values from the current ring buffer and average them
     for(uint8_t index = 0; index < RING_SIZE; index++) {
         averageAccelZ += ring[index].AccelZ;
-        averageVelZ += ring[index].VelZ;
         averagePressure += ring[index].Pressure;
     }
     averageAccelZ /= RING_SIZE;
-    averageVelZ /= RING_SIZE;
     averagePressure /= RING_SIZE;
     const float averagePressureToAltitude = sensors.getAltitudeBMP(averagePressure);
 
     // Get the differntials from the previous averages
     float averageAccelZDifferential = averageAccelZ - prevAverageAccelZ;
-    float averageVelZDifferential = averageVelZ - prevAverageVelZ;
     float averagePressureAltitudeDifferential = averagePressureToAltitude - prevAveragePressureToAltitude;
 
     // Update the previous averages for the next burnout detection
     prevAverageAccelZ = averageAccelZ;
-    prevAverageVelZ = averageVelZ;
     prevAveragePressureToAltitude = averagePressureToAltitude;
 
     // Setup the requirements for burnout detection
@@ -485,13 +491,6 @@ bool burnoutDetect(const RingBuffer<RING_SIZE>& ring) {
         return false;
     }
 
-    // Check if the velocity is decreasing
-    if(averageVelZDifferential <= 0) {   
-        velocityDecreasing = true;
-    } else {
-        velocityDecreasing = false;
-    }
-
     // Check if the altitude is increasing
     if(averagePressureAltitudeDifferential >= altimeterThreshold) {
         altitudeIncreasing = true;
@@ -499,7 +498,7 @@ bool burnoutDetect(const RingBuffer<RING_SIZE>& ring) {
         altitudeIncreasing = false;
     }
 
-    if((accelCount >= samplesRequired) && velocityDecreasing && altitudeIncreasing) {
+    if((accelCount >= samplesRequired) && altitudeIncreasing) {
         return true;
     }
 
@@ -508,7 +507,7 @@ bool burnoutDetect(const RingBuffer<RING_SIZE>& ring) {
 
 bool apogeeDetect(const RingBuffer<RING_SIZE>& ring) {
     #if __TEST__
-        return false;
+        // return false;
     #endif
 
     // Initalize variables for apogee detection
@@ -516,8 +515,8 @@ bool apogeeDetect(const RingBuffer<RING_SIZE>& ring) {
     float averagePressure = 0;
     static float prevAverageVelZ;
     static float prevAveragePressureToAltitude;
-    static float lowestVelocity;
     static float highestAltitude;
+    bool highestAltitudeReached = false;
 
     // Get the values from the current ring buffer and average them
     for(uint8_t index = 0; index < RING_SIZE; index++) {
@@ -527,6 +526,10 @@ bool apogeeDetect(const RingBuffer<RING_SIZE>& ring) {
     averageVelZ /= RING_SIZE;
     averagePressure /= RING_SIZE;
     const float averagePressureToAltitude = sensors.getAltitudeBMP(averagePressure);
+
+    if(averagePressureToAltitude > highestAltitude) {
+        highestAltitude = averagePressureToAltitude;
+    }
 
     // Get the differentials from the previous averages
     float averageVelZDifferential = averageVelZ - prevAverageVelZ;
@@ -549,7 +552,7 @@ bool apogeeDetect(const RingBuffer<RING_SIZE>& ring) {
     static uint8_t passedSamples;
     constexpr auto maxSampleCount = std::numeric_limits<decltype(passedSamples)>::max();
 
-    if((averageVelZDifferential >= velocityThreshold) && (averagePressureAltitudeDifferential <= altimeterThreshold)) {
+    if((averagePressureAltitudeDifferential <= altimeterThreshold) || highestAltitude > averagePressureToAltitude) {
         passedSamples + 1 > maxSampleCount ? passedSamples = maxSampleCount : passedSamples++;
     } else {
         passedSamples = 0;
@@ -563,34 +566,34 @@ bool apogeeDetect(const RingBuffer<RING_SIZE>& ring) {
 }
 
 bool landingDetect(const RingBuffer<RING_SIZE>& ring) {
-    const Acceleration accelThreshold = Acceleration::G_1;
-    const float velocityThreshold = 1.0;
-    const float positionThreshold = 3.0;
-    const float pressureThreshold = 5.0;
-    
-    data = ring.getFirst();
+    const Acceleration accelThreshold = Acceleration::G_2;
+    const float altitudeThreshold = 10.0;
+    float averagePressure = 0;
+    float averageAccelX = 0;
+    float averageAccelY = 0;
+    float averageAccelZ = 0;
+
+    for(uint8_t index = 0; index < RING_SIZE; index++) {
+        averagePressure += ring[index].Pressure;
+        averageAccelX += ring[index].AccelX;
+        averageAccelY += ring[index].AccelY;
+        averageAccelZ += ring[index].AccelZ;
+    }
+
+    averagePressure /= RING_SIZE;
+    averageAccelX /= RING_SIZE;
+    averageAccelY /= RING_SIZE;
+    averageAccelZ /= RING_SIZE;
+
+    float averagePressureToAltitude = sensors.getAltitudeBMP(averagePressure);
 
     // Check if the current acceleration for x,y,z exceeds the threshold for landing.
     // If it does, return false.
-    if(data.AccelX > accelThreshold || data.AccelY > accelThreshold || data.AccelZ > accelThreshold) {
+    if(averageAccelX > accelThreshold || averageAccelY > accelThreshold || averageAccelZ > accelThreshold) {
         return false;
     }
 
-    // Check if the current velocity for x,y,z exceeds the threshold for landing.
-    // If it does, return false.
-    if(abs(data.VelX -  ring.getLast().VelX) > velocityThreshold || abs(data.VelY - ring.getLast().VelY) > velocityThreshold || abs(data.VelZ - ring.getLast().VelZ) > velocityThreshold) {
-        return false;
-    }
-
-    // Check if the current position for the z-axis is within the threshold for landing.
-    // If it isn't, return false.
-    if(abs(data.PosZ - ring.getLast().PosZ) > positionThreshold) {
-        return false;
-    }
-
-    // Check if the current pressure is within the threshold for landing.
-    // If it isn't, return false.
-    if(abs(data.Pressure - sensors.getSeaLevelPressure()) > pressureThreshold) {
+    if(averagePressureToAltitude > altitudeThreshold) {
         return false;
     }
 
