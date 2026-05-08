@@ -95,6 +95,9 @@ void setup() {
     attachInterrupt(digitalPinToInterrupt(sensors.getLSM6DSO32IntPin1()), changeIMUInterruptPin1, FALLING);
     attachInterrupt(digitalPinToInterrupt(sensors.getLSM6DSO32IntPin2()), changeIMUInterruptPin2, FALLING);
 
+    radio.standbyXOSC = true;
+    radio.standby();
+
     /* Setup code here */
     // int16_t radioState = radio.begin(EBYTE_FREQ);
     // if(radioState != RADIOLIB_ERR_NONE) {
@@ -148,7 +151,7 @@ void setup() {
     
     for (uint8_t pin = 0; pin < numberOfServos; pin++) {
         pinMode(pin, OUTPUT);
-        servos[pin].attach(ServoPins[pin]);
+        servos[pin].attach(ServoPins[pin], minPulse, maxPulse);
         servos[pin].writeMicroseconds(neutralPulse);
     } 
 
@@ -417,7 +420,7 @@ bool launchDetect(const RingBuffer<RING_SIZE>& ring) {
 
     #else
         const Acceleration accelThreshold = Acceleration::G_9;
-        const uint8_t samplesRequired = 100;
+        const uint8_t samplesRequired = 10;
         const uint32_t altimeterThreshold = 2;
     #endif
     
@@ -438,7 +441,8 @@ bool launchDetect(const RingBuffer<RING_SIZE>& ring) {
         altitudeIncreasing = false;
     }
 
-    if((accelCount >= samplesRequired) && altitudeIncreasing) {
+    // if((accelCount >= samplesRequired) && altitudeIncreasing) {
+    if((accelCount >= samplesRequired)) {
         return true;
     }
     
@@ -478,7 +482,7 @@ bool burnoutDetect(const RingBuffer<RING_SIZE>& ring) {
     #else
         const Acceleration accelThreshold = Acceleration::G_9;
         const uint32_t altimeterThreshold = 2;
-        const uint8_t samplesRequired = 100;
+        const uint8_t samplesRequired = 10;
     #endif
     static uint8_t accelCount;
     constexpr auto maxAccelCount = std::numeric_limits<decltype(accelCount)>::max();
@@ -498,7 +502,8 @@ bool burnoutDetect(const RingBuffer<RING_SIZE>& ring) {
         altitudeIncreasing = false;
     }
 
-    if((accelCount >= samplesRequired) && altitudeIncreasing) {
+    // if((accelCount >= samplesRequired) && altitudeIncreasing) {
+    if((accelCount >= samplesRequired)) {
         return true;
     }
 
