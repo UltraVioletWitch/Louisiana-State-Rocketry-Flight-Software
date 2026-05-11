@@ -56,7 +56,7 @@ bool AllSensors::begin() {
     }
 
     calibrateBMPSeaLevel();
-    calibrateIMUGravityBias();
+    // calibrateIMUGravityBias();
 
     return success;
 }
@@ -236,15 +236,20 @@ void AllSensors::updateNoKalmanFilter(LSR_Struct& packet) {
         Serial.println(F("No GPS serial interface provided!"));
     }
 
-    if(gps.location.isValid()) {
-        rocketLatitude = gps.location.lat();
-        rocketLongitude = gps.location.lng();
-    }
-
-    if(gps.speed.isValid()) {
-        rocketSpeed = gps.speed.mps();
+    if(gps.location.isUpdated()) {
+        
+        if(gps.location.isValid()) {
+            rocketLatitude = gps.location.lat();
+            rocketLongitude = gps.location.lng();
+        }
     }
     
+    if(gps.speed.isUpdated()) {
+         if(gps.speed.isValid()) {
+            rocketSpeed = gps.speed.mps();
+        }
+    }
+
     #if __TEST__
 
         packet = {

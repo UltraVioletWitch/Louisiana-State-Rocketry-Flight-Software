@@ -12,8 +12,9 @@
 #include "constants.h"
 
 // GPS on Serial2, LSM CS=24, BMP CS=0
-SoftwareSerial gpsSerial(CORE_RXD7_PIN, CORE_TXD7_PIN);
-AllSensors sensors(&gpsSerial, 9600, 24, 0);
+// SoftwareSerial gpsSerial(CORE_RXD7_PIN, CORE_TXD7_PIN);
+// AllSensors sensors(&gpsSerial, 9600, 24, 0);
+AllSensors sensors(&Serial7, 9600, 24, 0);
 static const SPISettings spiSettings(1000000UL, MSBFIRST, SPI_MODE0); // What the default adafruit sensors use for SPI settings
 unsigned long accelAltTimer, GPSTimer;
 const float accelAltHz = 100;
@@ -95,10 +96,10 @@ void setup() {
     attachInterrupt(digitalPinToInterrupt(sensors.getLSM6DSO32IntPin1()), changeIMUInterruptPin1, FALLING);
     attachInterrupt(digitalPinToInterrupt(sensors.getLSM6DSO32IntPin2()), changeIMUInterruptPin2, FALLING);
 
-    radio.standbyXOSC = true;
-    radio.standby();
+    // radio.standbyXOSC = true;
+    // radio.standby();
 
-    /* Setup code here */
+    // /* Setup code here */
     // int16_t radioState = radio.begin(EBYTE_FREQ);
     // if(radioState != RADIOLIB_ERR_NONE) {
     //     Serial.printf("Failed to initialize radio, error code: %d\n", radioState);
