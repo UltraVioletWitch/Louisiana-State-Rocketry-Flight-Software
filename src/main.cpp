@@ -12,7 +12,7 @@
 #include "constants.h"
 
 // GPS on Serial2, LSM CS=24, BMP CS=0
-// SoftwareSerial gpsSerial(CORE_RXD7_PIN, CORE_TXD7_PIN);
+// SoftwareSerial gpsSerial(28, 29);
 // AllSensors sensors(&gpsSerial, 9600, 24, 0);
 AllSensors sensors(&Serial7, 9600, 24, 0);
 static const SPISettings spiSettings(1000000UL, MSBFIRST, SPI_MODE0); // What the default adafruit sensors use for SPI settings
@@ -87,6 +87,9 @@ void setup() {
             delay(200);
         }
     #endif
+
+    pinMode(8, OUTPUT);
+    digitalWrite(8, HIGH);
 
     if (!sensors.begin()) {
         Serial.println(F("One or more sensors failed to initialize!"));
@@ -306,16 +309,27 @@ void loop() {
 
                     if(isReturning) {
                         targetRoll = 0.0;
-                        digitalWrite(LEFT_LED_PIN, LOW);
-                        digitalWrite(RIGHT_LED_PIN, HIGH);
+                        // digitalWrite(LEFT_LED_PIN, LOW);
+                        // digitalWrite(RIGHT_LED_PIN, HIGH);
                     } else {
                         targetRoll = 90.0;
-                        digitalWrite(LEFT_LED_PIN, HIGH);
-                        digitalWrite(RIGHT_LED_PIN, LOW);
+                        // digitalWrite(LEFT_LED_PIN, HIGH);
+                        // digitalWrite(RIGHT_LED_PIN, LOW);
                     }
 
                     float deflection = rollCtrl.update(data, targetRoll, isReturning, current_dt);               
                     int pulseValue = int(map(deflection, -MAX_FIN_ANGLE, MAX_FIN_ANGLE, 1500 + ((800 / 90.0) * -MAX_FIN_ANGLE), 1500 + ((800 / 90.0) * MAX_FIN_ANGLE)));
+
+                    if(pulseValue > neutralPulse + 2) {
+                        digitalWrite(LEFT_LED_PIN, HIGH);
+                        digitalWrite(RIGHT_LED_PIN, LOW);
+                    } else if(pulseValue < neutralPulse - 2) {
+                        digitalWrite(LEFT_LED_PIN, LOW);
+                        digitalWrite(RIGHT_LED_PIN, HIGH);
+                    } else {
+                        digitalWrite(LEFT_LED_PIN, LOW);
+                        digitalWrite(RIGHT_LED_PIN, LOW);
+                    }
 
                     if(data.Theta > targetRoll + angleThreshold || data.Theta < targetRoll - angleThreshold)  { 
                         for (uint8_t pin = 0; pin < numberOfServos; pin++) {
@@ -420,7 +434,7 @@ bool launchDetect(const RingBuffer<RING_SIZE>& ring) {
         const uint32_t altimeterThreshold = 0;
 
     #else
-        const Acceleration accelThreshold = Acceleration::G_9;
+        const Acceleration accelThreshold = Acceleration::G_6;
         const uint8_t samplesRequired = 10;
         const uint32_t altimeterThreshold = 2;
     #endif
@@ -481,7 +495,7 @@ bool burnoutDetect(const RingBuffer<RING_SIZE>& ring) {
         const uint32_t altimeterThreshold = 0;
         const uint8_t samplesRequired = 50;
     #else
-        const Acceleration accelThreshold = Acceleration::G_9;
+        const Acceleration accelThreshold = Acceleration::G_6;
         const uint32_t altimeterThreshold = 2;
         const uint8_t samplesRequired = 10;
     #endif
@@ -513,13 +527,13 @@ bool burnoutDetect(const RingBuffer<RING_SIZE>& ring) {
 
 bool apogeeDetect(const RingBuffer<RING_SIZE>& ring) {
     #if __TEST__
-        // return false;
+        return false;
     #endif
 
     // Initalize variables for apogee detection
     float averageVelZ = 0;
     float averagePressure = 0;
-    static float prevAverageVelZ;
+    static float prevAverageVelZ;                                                                                                                                                                                                                                                                                                         
     static float prevAveragePressureToAltitude;
     static float highestAltitude;
     bool highestAltitudeReached = false;
@@ -553,7 +567,7 @@ bool apogeeDetect(const RingBuffer<RING_SIZE>& ring) {
     #else
         const uint32_t altimeterThreshold = 5;
         const uint8_t velocityThreshold = 2;
-        const uint8_t samplesRequired = 100;
+        const uint8_t samplesRequired = 10;
     #endif
     static uint8_t passedSamples;
     constexpr auto maxSampleCount = std::numeric_limits<decltype(passedSamples)>::max();

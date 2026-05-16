@@ -9,12 +9,11 @@ extern LSR_Struct data;
 // --- TUNING CONSTANTS (The 12 PID Terms) ---
 
 // INITIAL (Launch to 90° Hold)
-const float Kp_INIT_OUTER = 1.0, Ki_INIT_OUTER = 0.015, Kd_INIT_OUTER = 0.1;
-const float Kp_INIT_INNER = 3.5, Ki_INIT_INNER = 0.01, Kd_INIT_INNER = 0.02;
-
+const float Kp_INIT_OUTER = 0.5, Ki_INIT_OUTER = 0.0005, Kd_INIT_OUTER = 0.02;
+const float Kp_INIT_INNER = 2.0, Ki_INIT_INNER = 0.0001, Kd_INIT_INNER = 0.005;
 // RETURN (Back to 0°)
-const float Kp_RET_OUTER = 1.0, Ki_RET_OUTER = 0.1, Kd_RET_OUTER = 0.3;
-const float Kp_RET_INNER = 3.0, Ki_RET_INNER = 0.01, Kd_RET_INNER = 0.2;
+const float Kp_RET_OUTER = 0.5, Ki_RET_OUTER = 0.0005, Kd_RET_OUTER = 0.02;
+const float Kp_RET_INNER = 2.0, Ki_RET_INNER = 0.0001, Kd_RET_INNER = 0.005;
 
 // PHYSICAL LIMITS
 const float MAX_FIN_ANGLE = 12.0; // Degrees (Mechanical limit)

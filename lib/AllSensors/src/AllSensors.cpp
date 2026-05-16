@@ -230,7 +230,8 @@ void AllSensors::updateNoKalmanFilter(LSR_Struct& packet) {
         }
     } else if (gpsSerialSoftware) {
         while(gpsSerialSoftware->available()) {
-            gps.encode(gpsSerialSoftware->read());
+            // gps.encode(gpsSerialSoftware->read());
+            Serial.printf("%c", gpsSerialSoftware->read());
         }
     } else {
         Serial.println(F("No GPS serial interface provided!"));
@@ -296,6 +297,8 @@ void AllSensors::updateNoKalmanFilter(LSR_Struct& packet) {
             float(temp.temperature)
         };
     #endif
+
+    // Serial.printf("%ul, %.2f, %.2f\n", packet.TimeStamp, packet.PosX, packet.PosY);
 }
 
 void AllSensors::dataReadyLSMInt1(void) {
